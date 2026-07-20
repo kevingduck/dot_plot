@@ -140,7 +140,19 @@ export function DotPlot({ model, registry, colors, selectedUserId, onSelectUser 
         if (cell) {
           const type = typeByKey.get(cell.primary)
           const radius = markRadius(cell.total)
-          drawMark(ctx, cx, cy, radius, type?.shape ?? 'dot', seriesColor(colors, type?.slot ?? -1))
+          // Other event types that also happened this day get mini dots under
+          // the primary mark, in their own colors (tooltip has the counts).
+          const others = registry.filter((t) => t.key !== cell.primary && (cell.counts[t.key] ?? 0) > 0)
+          const my = others.length > 0 ? cy - 2 : cy
+          drawMark(ctx, cx, my, radius, type?.shape ?? 'dot', seriesColor(colors, type?.slot ?? -1))
+          const shown = others.slice(0, 3)
+          const startX = cx - ((shown.length - 1) * 5) / 2
+          shown.forEach((t, i) => {
+            ctx.fillStyle = seriesColor(colors, t.slot)
+            ctx.beginPath()
+            ctx.arc(startX + i * 5, cy + 7.5, 2, 0, Math.PI * 2)
+            ctx.fill()
+          })
         }
         if (isFirstDay) {
           ctx.strokeStyle = colors.inkSecondary
@@ -241,7 +253,7 @@ export function DotPlot({ model, registry, colors, selectedUserId, onSelectUser 
     ctx.moveTo(0, HEADER_H - 0.5)
     ctx.lineTo(GUTTER_W, HEADER_H - 0.5)
     ctx.stroke()
-  }, [model, colors, size, hover, focusCell, selectedUserId, typeByKey])
+  }, [model, colors, size, hover, focusCell, selectedUserId, typeByKey, registry])
 
   useEffect(() => {
     draw()

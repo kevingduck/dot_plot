@@ -15,14 +15,20 @@ function startOfDay(ts: number): number {
   return d.getTime()
 }
 
+export interface DateRange {
+  lastDays?: number // preset: N most recent days of data (0/undefined = all)
+  from?: string // custom range, YYYY-MM-DD (local)
+  to?: string
+}
+
 export interface ModelOptions {
-  rangeDays: number // 0 = all time
+  range: DateRange
   platform: string // 'all' or value
   plan: string
   search: string
   enabledEvents: Set<string>
   sortBy: SortKey
-  registryKeys: string[] // event keys in priority order (core first)
+  registryKeys: string[] // event keys in cell-display priority order (rarest first)
 }
 
 /** First event timestamp per user across the ENTIRE dataset (pre-filter), used for onboarding rings + cohorts. */
@@ -39,8 +45,22 @@ export function buildModel(ds: Dataset, opts: ModelOptions): GridModel {
 
   const dataEnd = startOfDay(ds.events[ds.events.length - 1].ts)
   const dataStart = startOfDay(ds.events[0].ts)
-  const rangeStart = opts.rangeDays > 0 ? Math.max(dataStart, dataEnd - (opts.rangeDays - 1) * DAY) : dataStart
-  const numDays = Math.round((dataEnd - rangeStart) / DAY) + 1
+  let rangeStart = dataStart
+  let rangeEnd = dataEnd
+  const { lastDays, from, to } = opts.range
+  if (from || to) {
+    if (to) {
+      const t = startOfDay(new Date(to + 'T00:00:00').getTime())
+      if (!Number.isNaN(t)) rangeEnd = Math.min(Math.max(t, dataStart), dataEnd)
+    }
+    if (from) {
+      const f = startOfDay(new Date(from + 'T00:00:00').getTime())
+      if (!Number.isNaN(f)) rangeStart = Math.min(Math.max(f, dataStart), rangeEnd)
+    }
+  } else if (lastDays && lastDays > 0) {
+    rangeStart = Math.max(dataStart, rangeEnd - (lastDays - 1) * DAY)
+  }
+  const numDays = Math.round((rangeEnd - rangeStart) / DAY) + 1
 
   const days: DayCol[] = []
   let prevMonth = -1
@@ -86,7 +106,7 @@ export function buildModel(ds: Dataset, opts: ModelOptions): GridModel {
     const key = normalize(e.event)
     if (!opts.enabledEvents.has(key)) continue
     const dayTs = startOfDay(e.ts)
-    if (dayTs < rangeStart || dayTs > dataEnd) continue
+    if (dayTs < rangeStart || dayTs > rangeEnd) continue
     const idx = Math.round((dayTs - rangeStart) / DAY)
     let cell = row.cells.get(idx)
     if (!cell) {

@@ -58,3 +58,37 @@ export interface GridModel {
 }
 
 export type SortKey = 'firstSeen' | 'activeDays' | 'lastActive' | 'streak'
+
+// ---- Codebase scan / event plan (scanner/scan.mjs output) ----
+
+export type EventTier = 'core' | 'activation' | 'feature' | 'noise'
+
+export interface InstrumentationPoint {
+  file: string
+  location: string
+  snippet: string
+}
+
+export interface PlannedEvent {
+  key: string
+  label: string
+  description: string
+  tier: EventTier
+  confidence: 'high' | 'medium' | 'low'
+  rationale: string
+  instrumentation: InstrumentationPoint[]
+}
+
+export interface EventPlan {
+  product_summary: string
+  core_event: string
+  events: PlannedEvent[]
+  meta?: {
+    scanned_path: string
+    files_included: number
+    files_skipped: number
+    model: string
+    generated_at: string
+    usage?: { input_tokens: number; output_tokens: number }
+  }
+}

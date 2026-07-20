@@ -1,5 +1,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+.env
+dotchart.events.json
 *.local
 .DS_Store

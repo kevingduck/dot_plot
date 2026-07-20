@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Dataset, SortKey } from './types'
+import type { Dataset, EventPlan, SortKey } from './types'
 import { COLORS, seriesColor, type Mode } from './theme'
 import { generateSample } from './data/generate'
 import { parseCsv, toCsv } from './data/csv'
@@ -9,6 +9,7 @@ import { DotPlot } from './components/DotPlot'
 import { RetentionChart } from './components/RetentionChart'
 import { StatTiles } from './components/StatTiles'
 import { UserDrawer } from './components/UserDrawer'
+import { EventPlanPanel } from './components/EventPlanPanel'
 import { ShapeIcon } from './components/ShapeIcon'
 
 type ThemePref = 'auto' | 'light' | 'dark'
@@ -24,11 +25,12 @@ function useMode(pref: ThemePref): Mode {
   return pref === 'auto' ? (osDark ? 'dark' : 'light') : pref
 }
 
-const RANGES: [number, string][] = [
-  [14, 'Last 14 days'],
-  [30, 'Last 30 days'],
-  [60, 'Last 60 days'],
-  [0, 'All time'],
+const RANGES: [string, string][] = [
+  ['14', 'Last 14 days'],
+  ['30', 'Last 30 days'],
+  ['60', 'Last 60 days'],
+  ['all', 'All time'],
+  ['custom', 'Custom range…'],
 ]
 
 export default function App() {
@@ -36,9 +38,11 @@ export default function App() {
   const [dataset, setDataset] = useState<Dataset>(() => generateSample(1))
   const [importError, setImportError] = useState<string | null>(null)
 
-  const [rangeDays, setRangeDays] = useState(60)
+  const [rangePreset, setRangePreset] = useState('60')
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo, setCustomTo] = useState('')
   const [platform, setPlatform] = useState('all')
-  const [plan, setPlan] = useState('all')
+  const [planFilter, setPlanFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<SortKey>('firstSeen')
   const [enabledEvents, setEnabledEvents] = useState<Set<string>>(() => new Set(dataset.registry.map((t) => t.key)))
@@ -47,6 +51,14 @@ export default function App() {
     const q = new URLSearchParams(window.location.search).get('theme')
     return q === 'dark' || q === 'light' ? q : 'auto'
   })
+
+  // Codebase scan / event plan
+  const [scanOpen, setScanOpen] = useState(false)
+  const [scanPath, setScanPath] = useState('')
+  const [scanning, setScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [plan, setPlan] = useState<EventPlan | null>(null)
+  const planFileRef = useRef<HTMLInputElement>(null)
   const mode = useMode(themePref)
   const colors = COLORS[mode]
   const fileRef = useRef<HTMLInputElement>(null)
@@ -60,7 +72,7 @@ export default function App() {
     setEnabledEvents(new Set(ds.registry.map((t) => t.key)))
     setSelectedUserId(null)
     setPlatform('all')
-    setPlan('all')
+    setPlanFilter('all')
     setSearch('')
     setImportError(null)
   }, [])
@@ -77,9 +89,15 @@ export default function App() {
     return keys
   }, [dataset])
 
+  const range = useMemo(() => {
+    if (rangePreset === 'custom') return { from: customFrom || undefined, to: customTo || undefined }
+    if (rangePreset === 'all') return {}
+    return { lastDays: Number(rangePreset) }
+  }, [rangePreset, customFrom, customTo])
+
   const model = useMemo(
-    () => buildModel(dataset, { rangeDays, platform, plan, search, enabledEvents, sortBy, registryKeys }),
-    [dataset, rangeDays, platform, plan, search, enabledEvents, sortBy, registryKeys],
+    () => buildModel(dataset, { range, platform, plan: planFilter, search, enabledEvents, sortBy, registryKeys }),
+    [dataset, range, platform, planFilter, search, enabledEvents, sortBy, registryKeys],
   )
 
   const coreType = dataset.registry.find((t) => t.core) ?? null
@@ -107,6 +125,44 @@ export default function App() {
     },
     [loadDataset],
   )
+
+  const runScan = useCallback(async () => {
+    if (!scanPath.trim() || scanning) return
+    setScanning(true)
+    setScanError(null)
+    try {
+      const res = await fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path: scanPath.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? `Scan failed (${res.status})`)
+      setPlan(data as EventPlan)
+      setScanOpen(false)
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setScanning(false)
+    }
+  }, [scanPath, scanning])
+
+  const onImportPlan = useCallback((file: File) => {
+    file.text().then(
+      (text) => {
+        try {
+          const parsed = JSON.parse(text)
+          if (!Array.isArray(parsed.events)) throw new Error('Not a DotChart event plan (missing events array)')
+          setPlan(parsed as EventPlan)
+          setScanOpen(false)
+          setScanError(null)
+        } catch (err) {
+          setScanError(err instanceof Error ? err.message : String(err))
+        }
+      },
+      () => setScanError('Could not read file'),
+    )
+  }, [])
 
   const onExport = useCallback(() => {
     const blob = new Blob([toCsv(dataset)], { type: 'text/csv' })
@@ -139,6 +195,9 @@ export default function App() {
             }}
           >
             New sample
+          </button>
+          <button className="btn" onClick={() => setScanOpen(!scanOpen)} aria-expanded={scanOpen}>
+            Scan codebase
           </button>
           <button className="btn" onClick={() => fileRef.current?.click()}>
             Import CSV
@@ -176,14 +235,67 @@ export default function App() {
         </div>
       )}
 
+      {scanOpen && (
+        <div className="scan-bar">
+          <div className="scan-bar-main">
+            <input
+              type="text"
+              className="scan-path"
+              placeholder="/path/to/your/codebase"
+              value={scanPath}
+              onChange={(e) => setScanPath(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && runScan()}
+              disabled={scanning}
+              aria-label="Codebase path"
+            />
+            <button className="btn btn-primary" onClick={runScan} disabled={scanning || !scanPath.trim()}>
+              {scanning ? 'Scanning… (~1 min)' : 'Scan with Claude'}
+            </button>
+            <button className="btn btn-ghost" onClick={() => planFileRef.current?.click()} disabled={scanning}>
+              …or import dotchart.events.json
+            </button>
+            <input
+              ref={planFileRef}
+              type="file"
+              accept=".json,application/json"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) onImportPlan(f)
+                e.target.value = ''
+              }}
+            />
+          </div>
+          <div className="scan-hint">
+            Reads the codebase server-side and asks Claude ({'Opus 4.8'}) to propose the user events worth tracking. Also
+            available as a CLI: <code>npm run scan -- /path/to/codebase</code>
+          </div>
+          {scanError && <div className="scan-error">⚠ {scanError}</div>}
+        </div>
+      )}
+
+      {plan && <EventPlanPanel plan={plan} onClose={() => setPlan(null)} />}
+
       <div className="filter-row">
-        <select value={rangeDays} onChange={(e) => setRangeDays(Number(e.target.value))} aria-label="Date range">
-          {RANGES.map(([d, label]) => (
-            <option key={d} value={d}>
+        <select value={rangePreset} onChange={(e) => setRangePreset(e.target.value)} aria-label="Date range">
+          {RANGES.map(([value, label]) => (
+            <option key={value} value={value}>
               {label}
             </option>
           ))}
         </select>
+        {rangePreset === 'custom' && (
+          <>
+            <input
+              type="date"
+              value={customFrom}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              aria-label="Range start"
+            />
+            <span className="range-sep">to</span>
+            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} aria-label="Range end" />
+          </>
+        )}
         <select value={platform} onChange={(e) => setPlatform(e.target.value)} aria-label="Platform">
           <option value="all">All platforms</option>
           {platforms.map((p) => (
@@ -192,7 +304,7 @@ export default function App() {
             </option>
           ))}
         </select>
-        <select value={plan} onChange={(e) => setPlan(e.target.value)} aria-label="Plan">
+        <select value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} aria-label="Plan">
           <option value="all">All plans</option>
           {plans.map((p) => (
             <option key={p} value={p}>
