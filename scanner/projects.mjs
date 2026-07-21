@@ -59,11 +59,69 @@ export function listWorkspaces() {
   return out
 }
 
+// Event keys of the built-in demo dataset (fictional music app)
+const DEMO_KEYS = new Set(['played_song', 'created_playlist', 'shared_song', 'searched'])
+
+/**
+ * Self-healing migration: workspaces saved by older builds could contain the
+ * demo dataset (or demo + real mixed). Scrub on load: keep real events,
+ * discard fiction; rebuild the registry from the plan. Persists the cleaned
+ * version so the scrub runs once.
+ */
+function sanitizeWorkspace(ws, file) {
+  const ds = ws.dataset
+  if (!ds || !String(ds.source ?? '').startsWith('Sample data')) return ws
+  const real = (ds.events ?? []).filter((e) => !DEMO_KEYS.has(e.event))
+  if (real.length === 0) {
+    ws.dataset = null
+  } else {
+    real.sort((a, b) => a.ts - b.ts)
+    const users = [...new Set(real.map((e) => e.userId))].map((id) => ({
+      id,
+      name: id.startsWith('anon_') ? `Visitor ${id.slice(5, 11)}` : id,
+      platform: '—',
+      plan: '—',
+      country: '—',
+    }))
+    const present = new Set(real.map((e) => e.event))
+    let ordered = []
+    if (ws.plan?.events?.length) {
+      const core = ws.plan.core_event
+      const keys = ws.plan.events.map((e) => e.key)
+      ordered = [core, ...keys.filter((k) => k !== core)].filter((k) => present.has(k))
+    }
+    if (ordered.length === 0) {
+      const freq = new Map()
+      for (const e of real) freq.set(e.event, (freq.get(e.event) ?? 0) + 1)
+      ordered = [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k)
+    }
+    const labels = new Map((ws.plan?.events ?? []).map((e) => [e.key, e.label]))
+    const shapes = ['circle', 'square', 'diamond', 'triangle']
+    const registry = ordered.slice(0, 4).map((key, i) => ({
+      key,
+      label: labels.get(key) ?? key,
+      shape: shapes[i],
+      slot: i,
+      core: i === 0,
+    }))
+    if ([...present].some((k) => !ordered.slice(0, 4).includes(k))) {
+      registry.push({ key: '__other__', label: 'Other', shape: 'dot', slot: -1, core: false })
+    }
+    ws.dataset = { users, events: real, registry, source: `${ws.name ?? 'project'} (live tracked events)` }
+  }
+  try {
+    fs.writeFileSync(file, JSON.stringify(ws))
+  } catch {
+    /* scrub still applies for this load */
+  }
+  return ws
+}
+
 export function loadWorkspace(slug) {
   if (!/^[a-z0-9-]+$/.test(slug)) throw new Error('Bad workspace id')
   const file = path.join(DIR, `${slug}.json`)
   if (!fs.existsSync(file)) throw new Error('Workspace not found')
-  return JSON.parse(fs.readFileSync(file, 'utf8'))
+  return sanitizeWorkspace(JSON.parse(fs.readFileSync(file, 'utf8')), file)
 }
 
 export function deleteWorkspace(slug) {

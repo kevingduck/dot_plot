@@ -55,6 +55,8 @@ function loadPersisted(): Persisted | null {
     if (!raw) return null
     const p = JSON.parse(raw) as Persisted
     if (!p.dataset?.users || !p.dataset?.events || !p.dataset?.registry) return null
+    // Never restore a demo-tainted session (older builds could cache one)
+    if (p.dataset.source.startsWith('Sample data')) return null
     return p
   } catch {
     return null
