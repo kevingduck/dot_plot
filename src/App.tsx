@@ -81,6 +81,14 @@ function registryFromPlan(names: Set<string>, accepted: { key: string; label: st
   return registry
 }
 
+function relTime(ts: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000))
+  if (s < 90) return 'just now'
+  if (s < 3600) return `${Math.round(s / 60)}m ago`
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`
+  return `${Math.round(s / 86400)}d ago`
+}
+
 const RANGES: [string, string][] = [
   ['14', 'Last 14 days'],
   ['30', 'Last 30 days'],
@@ -138,6 +146,7 @@ export default function App() {
   const [dbSync, setDbSync] = useState<DbSyncConfig | null>(persisted?.dbSync ?? null)
   const [refreshing, setRefreshing] = useState(false)
   const [liveCount, setLiveCount] = useState(0)
+  const [liveLastAt, setLiveLastAt] = useState<number | null>(null)
   const [highlightUsers, setHighlightUsers] = useState<Set<string> | null>(null)
   const mergedCountRef = useRef(0)
 
@@ -213,9 +222,10 @@ export default function App() {
     let stopped = false
     const check = async () => {
       try {
-        const info = await postJson<{ count: number }>('/api/store/events', { countOnly: true })
+        const info = await postJson<{ count: number; lastReceived: number | null }>('/api/store/events', { countOnly: true })
         if (stopped) return
         setLiveCount(info.count)
+        setLiveLastAt(info.lastReceived ?? null)
         if (info.count > mergedCountRef.current) {
           const full = await postJson<{ events: { userId: string; event: string; ts: number }[] }>('/api/store/events', {})
           if (stopped) return
@@ -577,8 +587,12 @@ export default function App() {
         <span className="source-label">{dataset.source}</span>
         {appMode.hosted && <span className="mode-chip">hosted</span>}
         {liveCount > 0 && (
-          <span className="live-chip" title={`${liveCount} events received live via the ingest endpoint`}>
-            ● {liveCount} live
+          <span
+            className="live-chip"
+            title="Total events your instrumented app has sent to the ingest endpoint (all time, all projects). They merge into the grid automatically."
+          >
+            ● {liveCount} tracked event{liveCount === 1 ? '' : 's'} received
+            {liveLastAt != null && <span className="live-when"> · last {relTime(liveLastAt)}</span>}
           </span>
         )}
         {dbSync && (

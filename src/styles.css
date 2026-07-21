@@ -369,6 +369,10 @@ body {
   color: #0ca30c;
   white-space: nowrap;
 }
+.live-when {
+  font-weight: 400;
+  color: var(--text-muted);
+}
 .insight-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
