@@ -797,6 +797,15 @@ button.picker-row:hover {
   margin-top: 3px;
   max-width: 34ch;
 }
+.track-status {
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+.track-live {
+  color: #0ca30c;
+  font-weight: 600;
+}
 .plan-map {
   margin-top: 6px;
   font-size: 11px;

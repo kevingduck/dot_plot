@@ -570,6 +570,7 @@ export default function App() {
           key={`${plan.meta?.generated_at ?? ''}:${plan.events.map((e) => e.key).join(',')}`}
           plan={plan}
           datasetEvents={datasetEventNames}
+          datasetIsDemo={dataset.source.startsWith('Sample data') && !dataset.source.includes(' + live')}
           onApply={applyPlan}
           onClose={() => setPlanOpen(false)}
         />

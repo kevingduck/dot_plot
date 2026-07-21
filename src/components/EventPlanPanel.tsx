@@ -14,6 +14,7 @@ const TIER_LABEL: Record<EventTier, string> = {
 interface Props {
   plan: EventPlan
   datasetEvents: Set<string>
+  datasetIsDemo: boolean
   onApply: (accepted: { key: string; label: string }[], coreKey: string) => void
   onClose: () => void
 }
@@ -37,7 +38,7 @@ function guessMatch(planKey: string, datasetNames: string[]): string {
   return bestScore >= 1 ? best : ''
 }
 
-export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props) {
+export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, onClose }: Props) {
   const [accepted, setAccepted] = useState<Set<string>>(
     () => new Set(plan.events.filter((e) => e.tier !== 'noise').map((e) => e.key)),
   )
@@ -49,7 +50,15 @@ export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props)
   )
   const [expanded, setExpanded] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
-  const [showInstrument, setShowInstrument] = useState(false)
+
+  // Which accepted events are actually reporting data right now?
+  const reportingKeys = useMemo(
+    () => new Set(plan.events.filter((e) => !datasetIsDemo && datasetEvents.has(e.key)).map((e) => e.key)),
+    [plan, datasetEvents, datasetIsDemo],
+  )
+  const reportingCount = useMemo(() => [...accepted].filter((k) => reportingKeys.has(k)).length, [accepted, reportingKeys])
+  // Nothing reporting yet → instrumentation IS the next step; open it
+  const [showInstrument, setShowInstrument] = useState(() => reportingKeys.size === 0 && plan.events.every((e) => !e.db_mapping?.table))
 
   const sorted = useMemo(
     () => [...plan.events].sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier)),
@@ -108,28 +117,38 @@ export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props)
             {plan.meta
               ? `Scanned ${plan.meta.scanned_path} (${plan.meta.files_included} files, ${plan.meta.model}${estimateCost(plan.meta.model, plan.meta.usage) ? `, ~${estimateCost(plan.meta.model, plan.meta.usage)}` : ''})`
               : 'Imported plan'}{' '}
-            · {accepted.size} of {plan.events.length} events accepted
+            · {accepted.size} of {plan.events.length} events accepted ·{' '}
+            <strong>
+              {reportingCount === 0 ? 'none reporting data yet' : `${reportingCount} of ${accepted.size} reporting data`}
+            </strong>
           </p>
         </div>
         <div className="plan-actions">
           <button
-            className="btn btn-primary"
-            disabled={mappedPairs.length === 0}
-            title={
-              mappedPairs.length === 0
-                ? 'No accepted events are matched to your data — use the "in your data" selector on each event, or import matching data first'
-                : 'Use the accepted events as the grid legend (labels, symbols, core event)'
-            }
-            onClick={() => {
-              const mappedCore = mapping.get(coreKey) || mappedPairs[0]?.key
-              onApply(mappedPairs, mappedCore)
-            }}
+            className={reportingCount === 0 ? 'btn btn-primary' : 'btn'}
+            onClick={() => setShowInstrument(!showInstrument)}
+            aria-expanded={showInstrument}
+            title="Write the track() calls into the codebase — reviewed by you, applied on a git branch"
           >
-            Apply to grid ({mappedPairs.length} mapped)
+            {reportingCount === 0 ? '⚡ Start tracking' : 'Instrument more events…'}
           </button>
-          <button className="btn" onClick={() => setShowInstrument(!showInstrument)} aria-expanded={showInstrument}>
-            Instrument codebase…
-          </button>
+          {!(datasetIsDemo && mappedPairs.length === 0) && (
+            <button
+              className="btn"
+              disabled={mappedPairs.length === 0}
+              title={
+                mappedPairs.length === 0
+                  ? 'No accepted events are matched to your data — use the "in your data" selector on each event, or import matching data first'
+                  : 'Use the accepted events as the grid legend (labels, symbols, core event)'
+              }
+              onClick={() => {
+                const mappedCore = mapping.get(coreKey) || mappedPairs[0]?.key
+                onApply(mappedPairs, mappedCore)
+              }}
+            >
+              Apply to grid ({mappedPairs.length} mapped)
+            </button>
+          )}
           <button className="btn" onClick={exportAccepted}>
             Export accepted plan
           </button>
@@ -141,12 +160,16 @@ export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props)
 
       <p className="plan-summary">{plan.product_summary}</p>
 
-      {mappedPairs.length === 0 && datasetNames.length > 0 && (
+      {reportingCount === 0 && (
         <p className="plan-map-hint">
-          None of the proposed event keys appear in the loaded dataset (it has: {datasetNames.slice(0, 6).join(', ')}
-          {datasetNames.length > 6 ? ', …' : ''}). Plan keys describe what the codebase <em>will</em> emit once
-          instrumented — to chart the data you already have, match each plan event to one of your dataset's events with
-          the "in your data" selector, then apply.
+          <strong>None of these events are being tracked yet</strong> — the plan describes what this codebase{' '}
+          <em>could</em> report. Click <strong>⚡ Start tracking</strong> below: DotChart writes the one-line track()
+          calls for you (you review every change; it lands on a git branch, never your working code). Once the branch is
+          merged and <code>DOTCHART_INGEST_URL</code> is set, events flow in automatically and each row below flips to
+          "● reporting data".
+          {!datasetIsDemo && datasetNames.length > 0 && (
+            <> Already have this data under different names? Use the "in your data" selector on each event, then Apply to grid.</>
+          )}
         </p>
       )}
 
@@ -194,7 +217,14 @@ export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props)
                   <div className="plan-event-label">{e.label}</div>
                   <code className="plan-event-key">{e.key}</code>
                   <div className="plan-event-desc">{e.description}</div>
-                  {datasetNames.length > 0 && (
+                  <div className={`track-status${reportingKeys.has(e.key) ? ' track-live' : ''}`}>
+                    {reportingKeys.has(e.key)
+                      ? '● reporting data'
+                      : e.db_mapping?.table
+                        ? `◐ in your database (${e.db_mapping.table}) — import via Connect`
+                        : '○ not tracked yet'}
+                  </div>
+                  {datasetNames.length > 0 && !datasetIsDemo && (
                     <div className="plan-map">
                       in your data:{' '}
                       <select
