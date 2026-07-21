@@ -73,6 +73,27 @@ function scannerApi(): Plugin {
         }),
       )
 
+      // Folder picker: list directories on this machine
+      server.middlewares.use(
+        '/api/fs/list',
+        json(async (body) => {
+          const { path: targetPath } = body as { path?: string }
+          const { listDirectory } = await import('./scanner/connect.mjs')
+          return listDirectory(targetPath || undefined)
+        }),
+      )
+
+      // Clone (or refresh) a GitHub repo locally; token used once, never stored
+      server.middlewares.use(
+        '/api/github/clone',
+        ndjson(async (body, onStatus) => {
+          const { url, token } = body as { url?: string; token?: string }
+          if (!url) throw new Error('Body must be {"url": "https://github.com/owner/repo"}')
+          const { cloneGithubRepo } = await import('./scanner/connect.mjs')
+          return cloneGithubRepo(url, token || undefined, { onStatus })
+        }),
+      )
+
       // Connect wizard: fast local discovery (no AI)
       server.middlewares.use(
         '/api/connect/discover',

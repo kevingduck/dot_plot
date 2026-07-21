@@ -324,6 +324,194 @@ body {
   margin-top: 3px;
 }
 
+/* ---- data menu ---- */
+.menu-wrap {
+  position: relative;
+}
+.menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 60;
+  min-width: 250px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+}
+.menu button {
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.menu button:hover {
+  background: var(--wash);
+}
+
+/* ---- folder picker ---- */
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.picker-recents {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.picker-recent {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+.picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.picker-shortcut {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+.picker-path {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-secondary);
+  margin-left: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60ch;
+}
+.picker-list {
+  border: 1px solid var(--gridline);
+  border-radius: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--gridline);
+  text-align: left;
+  cursor: pointer;
+}
+.picker-row:last-child {
+  border-bottom: none;
+}
+button.picker-row {
+  padding: 7px 12px;
+}
+.picker-nav {
+  flex: 1;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  padding: 7px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.picker-nav:hover,
+button.picker-row:hover {
+  background: var(--wash);
+}
+.picker-icon {
+  flex-shrink: 0;
+}
+.picker-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 0.5px 7px;
+}
+.picker-choose {
+  margin-right: 8px;
+  padding: 3px 12px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.picker-empty {
+  padding: 14px;
+}
+
+/* ---- wizard tabs / github / advanced ---- */
+.wizard-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--gridline);
+}
+.wizard-tab {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.wizard-tab-on {
+  color: var(--text-primary);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+.wizard-github {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.wizard-github .scan-path {
+  width: 100%;
+  max-width: 560px;
+}
+.wizard-advanced {
+  margin-top: 16px;
+  border-top: 1px solid var(--gridline);
+  padding-top: 10px;
+}
+.wizard-advanced summary {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.wizard-advanced-body {
+  margin-top: 10px;
+}
+.wizard-advanced-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
 /* ---- settings ---- */
 .settings-section {
   margin-bottom: 16px;

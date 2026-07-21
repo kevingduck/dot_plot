@@ -1,26 +1,108 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { DiscoveredProject, EventPlan, RawEvent } from '../types'
 import { postJson, postNdjson } from '../lib/api'
-import { aiParams } from '../lib/settings'
+import { addRecent, aiParams, getRecents } from '../lib/settings'
+import { DbPanel } from './DbPanel'
 
-type Phase = 'path' | 'discovering' | 'discovered' | 'analyzing' | 'review' | 'importing'
+type Phase = 'pick' | 'cloning' | 'discovering' | 'discovered' | 'analyzing' | 'review' | 'importing'
 
 interface ImportResponse {
   events: { userId: string; event: string; ts: number }[]
   summary: { table: string; event: string; rows: number; error?: string }[]
 }
 
+interface DirListing {
+  path: string
+  parent: string | null
+  home: string
+  isProject: boolean
+  shortcuts: { name: string; path: string }[]
+  dirs: { name: string; path: string; isProject: boolean }[]
+}
+
 interface Props {
   onData: (events: RawEvent[], source: string, plan: EventPlan) => void
   onPlanOnly: (plan: EventPlan) => void
+  onDbImport: (events: RawEvent[], source: string) => void
+  onImportCsv: () => void
+  onImportPlanFile: () => void
+  onDemo: () => void
   onClose: () => void
 }
 
 const TIER_LABEL: Record<string, string> = { core: 'Core value', activation: 'Activation', feature: 'Feature', noise: 'Noise' }
 
-export function ConnectWizard({ onData, onPlanOnly, onClose }: Props) {
-  const [phase, setPhase] = useState<Phase>('path')
-  const [path, setPath] = useState('')
+/** Click-to-browse folder picker backed by /api/fs/list. */
+function FolderPicker({ onSelect, disabled }: { onSelect: (path: string) => void; disabled: boolean }) {
+  const [listing, setListing] = useState<DirListing | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const recents = useMemo(getRecents, [])
+
+  const browse = (path?: string) => {
+    postJson<DirListing>('/api/fs/list', { path }).then(setListing, (e) => setError(e.message))
+  }
+  useEffect(() => browse(), [])
+
+  if (error) return <div className="scan-error">⚠ {error}</div>
+  if (!listing) return <div className="scan-hint">Loading folders…</div>
+
+  return (
+    <div className="picker">
+      {recents.length > 0 && (
+        <div className="picker-recents">
+          Recent:
+          {recents.map((r) => (
+            <button key={r.path} className="btn picker-recent" onClick={() => onSelect(r.path)} disabled={disabled} title={r.path}>
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="picker-bar">
+        {listing.shortcuts.map((s) => (
+          <button key={s.path} className="btn btn-ghost picker-shortcut" onClick={() => browse(s.path)}>
+            {s.name}
+          </button>
+        ))}
+        <span className="picker-path" title={listing.path}>
+          {listing.path.replace(listing.home, '~')}
+        </span>
+      </div>
+      <div className="picker-list">
+        {listing.parent && (
+          <button className="picker-row" onClick={() => browse(listing.parent!)}>
+            <span className="picker-icon">↰</span> ..
+          </button>
+        )}
+        {listing.dirs.map((d) => (
+          <div className="picker-row" key={d.path}>
+            <button className="picker-nav" onClick={() => browse(d.path)}>
+              <span className="picker-icon">📁</span> {d.name}
+              {d.isProject && <span className="picker-badge">project</span>}
+            </button>
+            {d.isProject && (
+              <button className="btn btn-primary picker-choose" onClick={() => onSelect(d.path)} disabled={disabled}>
+                Select
+              </button>
+            )}
+          </div>
+        ))}
+        {listing.dirs.length === 0 && <div className="scan-hint picker-empty">No folders here.</div>}
+      </div>
+      {listing.isProject && (
+        <button className="btn btn-primary" onClick={() => onSelect(listing.path)} disabled={disabled}>
+          Use this folder ({listing.path.split('/').pop()})
+        </button>
+      )}
+    </div>
+  )
+}
+
+export function ConnectWizard({ onData, onPlanOnly, onDbImport, onImportCsv, onImportPlanFile, onDemo, onClose }: Props) {
+  const [phase, setPhase] = useState<Phase>('pick')
+  const [tab, setTab] = useState<'local' | 'github'>('local')
+  const [ghUrl, setGhUrl] = useState('')
+  const [ghToken, setGhToken] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('')
   const [project, setProject] = useState<DiscoveredProject | null>(null)
@@ -30,18 +112,32 @@ export function ConnectWizard({ onData, onPlanOnly, onClose }: Props) {
   const [accepted, setAccepted] = useState<Set<string>>(new Set())
   const [days, setDays] = useState(90)
 
-  const discover = async () => {
+  const discover = async (path: string) => {
     setPhase('discovering')
     setError(null)
     try {
-      const p = await postJson<DiscoveredProject>('/api/connect/discover', { path: path.trim() })
+      const p = await postJson<DiscoveredProject>('/api/connect/discover', { path })
       setProject(p)
       setUseDb(p.databases.length > 0)
       setDbIndex(0)
+      addRecent({ path: p.root, name: p.name })
       setPhase('discovered')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
-      setPhase('path')
+      setPhase('pick')
+    }
+  }
+
+  const cloneGithub = async () => {
+    setPhase('cloning')
+    setError(null)
+    try {
+      const r = await postNdjson<{ path: string }>('/api/github/clone', { url: ghUrl.trim(), token: ghToken.trim() || undefined }, setStatus)
+      setGhToken('')
+      await discover(r.path)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setPhase('pick')
     }
   }
 
@@ -51,7 +147,11 @@ export function ConnectWizard({ onData, onPlanOnly, onClose }: Props) {
     setError(null)
     try {
       const conn = useDb && project.databases[dbIndex] ? project.databases[dbIndex].connectionString : undefined
-      const result = await postNdjson<EventPlan>('/api/connect/analyze', { path: project.root, connectionString: conn, ...aiParams() }, setStatus)
+      const result = await postNdjson<EventPlan>(
+        '/api/connect/analyze',
+        { path: project.root, connectionString: conn, ...aiParams() },
+        setStatus,
+      )
       setPlan(result)
       setAccepted(new Set(result.events.filter((e) => e.tier !== 'noise').map((e) => e.key)))
       setPhase('review')
@@ -68,7 +168,6 @@ export function ConnectWizard({ onData, onPlanOnly, onClose }: Props) {
   const finish = async () => {
     if (!plan || !project) return
     setError(null)
-    // No DB-backed events (or no DB) — hand the plan over for instrumentation
     if (dbEvents.length === 0) {
       onPlanOnly({ ...plan, events: acceptedEvents.length ? acceptedEvents : plan.events })
       return
@@ -102,39 +201,83 @@ export function ConnectWizard({ onData, onPlanOnly, onClose }: Props) {
       <div className="card-head">
         <div>
           <h2>Connect your project</h2>
-          <p className="card-sub">Point DotChart at a codebase — it finds your database and your events, you approve, done.</p>
+          <p className="card-sub">Pick your project — DotChart finds your database and your events; you approve; done.</p>
         </div>
         <button className="btn btn-ghost" onClick={onClose} aria-label="Close">
           ✕
         </button>
       </div>
 
-      {(phase === 'path' || phase === 'discovering') && (
+      {(phase === 'pick' || phase === 'cloning' || phase === 'discovering') && (
         <>
-          <div className="scan-bar-main">
-            <input
-              type="text"
-              className="scan-path"
-              placeholder="/path/to/your/project"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && path.trim() && discover()}
-              disabled={phase === 'discovering'}
-              aria-label="Project path"
-              autoFocus
-            />
-            <button className="btn btn-primary" onClick={discover} disabled={!path.trim() || phase === 'discovering'}>
-              {phase === 'discovering' ? 'Looking…' : 'Connect'}
+          <div className="wizard-tabs" role="tablist">
+            <button className={`wizard-tab${tab === 'local' ? ' wizard-tab-on' : ''}`} role="tab" aria-selected={tab === 'local'} onClick={() => setTab('local')}>
+              On this computer
+            </button>
+            <button className={`wizard-tab${tab === 'github' ? ' wizard-tab-on' : ''}`} role="tab" aria-selected={tab === 'github'} onClick={() => setTab('github')}>
+              From GitHub
             </button>
           </div>
-          <div className="scan-hint">
-            Everything runs on this machine: your code, your database connection, and your data stay local — only a code
-            digest goes to Claude for analysis. Not ready?{' '}
-            <button className="btn-link" onClick={onClose}>
-              explore the demo data instead
-            </button>
-            .
-          </div>
+
+          {tab === 'local' && <FolderPicker onSelect={discover} disabled={phase !== 'pick'} />}
+
+          {tab === 'github' && (
+            <div className="wizard-github">
+              <input
+                type="text"
+                className="scan-path"
+                placeholder="https://github.com/owner/repo"
+                value={ghUrl}
+                onChange={(e) => setGhUrl(e.target.value)}
+                disabled={phase !== 'pick'}
+                aria-label="GitHub repository URL"
+              />
+              <input
+                type="password"
+                className="scan-path"
+                placeholder="Access token — only needed for private repos"
+                value={ghToken}
+                onChange={(e) => setGhToken(e.target.value)}
+                disabled={phase !== 'pick'}
+                aria-label="GitHub access token"
+                autoComplete="off"
+              />
+              <div className="scan-hint">
+                The repo is copied to this machine and analyzed locally. A token is used once for the download and never
+                stored (private repos: github.com → Settings → Developer settings → Fine-grained tokens → read-only
+                access to the repo).
+              </div>
+              <button className="btn btn-primary" onClick={cloneGithub} disabled={!ghUrl.trim() || phase !== 'pick'}>
+                {phase === 'cloning' ? 'Downloading…' : 'Connect repo'}
+              </button>
+            </div>
+          )}
+
+          {(phase === 'cloning' || phase === 'discovering') && (
+            <div className="scan-status" role="status">
+              <span className="scan-pulse" aria-hidden="true" />
+              {phase === 'discovering' ? 'Looking at the project…' : status}
+            </div>
+          )}
+
+          <details className="wizard-advanced">
+            <summary>Other ways to add data</summary>
+            <div className="wizard-advanced-body">
+              <div className="wizard-advanced-row">
+                <button className="btn" onClick={onImportCsv}>
+                  Import a CSV of events
+                </button>
+                <button className="btn" onClick={onImportPlanFile}>
+                  Import an event plan (dotchart.events.json)
+                </button>
+                <button className="btn" onClick={onDemo}>
+                  Load demo data
+                </button>
+              </div>
+              <div className="scan-divider" />
+              <DbPanel onImport={onDbImport} />
+            </div>
+          </details>
         </>
       )}
 
@@ -177,7 +320,7 @@ export function ConnectWizard({ onData, onPlanOnly, onClose }: Props) {
             <button className="btn btn-primary" onClick={analyze}>
               Analyze project (~1 min)
             </button>
-            <button className="btn btn-ghost" onClick={() => setPhase('path')}>
+            <button className="btn btn-ghost" onClick={() => setPhase('pick')}>
               Back
             </button>
           </div>

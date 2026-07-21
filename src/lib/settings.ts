@@ -60,3 +60,27 @@ export function aiParams(): { model: string; apiKey?: string } {
   const s = getSettings()
   return { model: s.model, apiKey: s.apiKey || undefined }
 }
+
+// ---- Recently connected projects ----
+
+const RECENTS_KEY = 'dotchart:recent-projects'
+
+export interface RecentProject {
+  path: string
+  name: string
+}
+
+export function getRecents(): RecentProject[] {
+  try {
+    const raw = localStorage.getItem(RECENTS_KEY)
+    if (raw) return (JSON.parse(raw) as RecentProject[]).filter((r) => r.path && r.name)
+  } catch {
+    /* fall through */
+  }
+  return []
+}
+
+export function addRecent(r: RecentProject) {
+  const list = [r, ...getRecents().filter((x) => x.path !== r.path)].slice(0, 5)
+  localStorage.setItem(RECENTS_KEY, JSON.stringify(list))
+}

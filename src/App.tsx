@@ -3,8 +3,6 @@ import type { Dataset, EventPlan, EventType, SortKey } from './types'
 import { COLORS, seriesColor, type Mode } from './theme'
 import { generateSample } from './data/generate'
 import { datasetFromEvents, parseCsv, toCsv } from './data/csv'
-import { postNdjson } from './lib/api'
-import { aiParams } from './lib/settings'
 import { buildModel, computeStats } from './lib/model'
 import { buildCohorts } from './lib/retention'
 import { DotPlot } from './components/DotPlot'
@@ -12,7 +10,6 @@ import { RetentionChart } from './components/RetentionChart'
 import { StatTiles } from './components/StatTiles'
 import { UserDrawer } from './components/UserDrawer'
 import { EventPlanPanel } from './components/EventPlanPanel'
-import { DbPanel } from './components/DbPanel'
 import { ConnectWizard } from './components/ConnectWizard'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ShapeIcon } from './components/ShapeIcon'
@@ -99,15 +96,10 @@ export default function App() {
     return q === 'dark' || q === 'light' ? q : 'auto'
   })
 
-  // Codebase scan / event plan
-  const [scanOpen, setScanOpen] = useState(false)
-  const [scanPath, setScanPath] = useState('')
-  const [scanning, setScanning] = useState(false)
-  const [scanStatus, setScanStatus] = useState('')
-  const [scanStartedAt, setScanStartedAt] = useState(0)
-  const [scanElapsed, setScanElapsed] = useState(0)
-  const [scanError, setScanError] = useState<string | null>(null)
+  // Event plan (from the Connect wizard or an imported file)
   const [plan, setPlan] = useState<EventPlan | null>(persisted?.plan ?? null)
+  const [planOpen, setPlanOpen] = useState(persisted?.plan != null)
+  const [dataMenuOpen, setDataMenuOpen] = useState(false)
   const planFileRef = useRef<HTMLInputElement>(null)
 
   // Persist real data (not the regenerable sample) across reloads
@@ -192,29 +184,8 @@ export default function App() {
   )
 
   useEffect(() => {
-    if (!scanning) return
-    const t = setInterval(() => setScanElapsed(Math.round((Date.now() - scanStartedAt) / 1000)), 1000)
-    return () => clearInterval(t)
-  }, [scanning, scanStartedAt])
-
-  const runScan = useCallback(async () => {
-    if (!scanPath.trim() || scanning) return
-    setScanning(true)
-    setScanError(null)
-    setScanStatus('Starting scan…')
-    setScanStartedAt(Date.now())
-    setScanElapsed(0)
-    try {
-      const result = await postNdjson<EventPlan>('/api/scan', { path: scanPath.trim(), ...aiParams() }, setScanStatus)
-      setPlan(result)
-      setScanOpen(false)
-    } catch (err) {
-      setScanError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setScanning(false)
-      setScanStatus('')
-    }
-  }, [scanPath, scanning])
+    setDataMenuOpen(false)
+  }, [dataset])
 
   // Apply accepted plan events to the grid: matched keys become the registry
   // (labels, shapes, core flag), everything else folds into "Other".
@@ -235,6 +206,7 @@ export default function App() {
       const registry = registryFromPlan(new Set(ds.events.map((e) => e.event)), wizardPlan.events, wizardPlan.core_event)
       loadDataset(registry ? { ...ds, registry } : ds)
       setPlan(wizardPlan)
+      setPlanOpen(true)
       setWizardOpen(false)
     },
     [loadDataset],
@@ -247,13 +219,13 @@ export default function App() {
           const parsed = JSON.parse(text)
           if (!Array.isArray(parsed.events)) throw new Error('Not a DotChart event plan (missing events array)')
           setPlan(parsed as EventPlan)
-          setScanOpen(false)
-          setScanError(null)
+          setPlanOpen(true)
+          setWizardOpen(false)
         } catch (err) {
-          setScanError(err instanceof Error ? err.message : String(err))
+          setImportError(err instanceof Error ? err.message : String(err))
         }
       },
-      () => setScanError('Could not read file'),
+      () => setImportError('Could not read file'),
     )
   }, [])
 
@@ -282,25 +254,39 @@ export default function App() {
           <button className="btn btn-primary" onClick={() => setWizardOpen(!wizardOpen)} aria-expanded={wizardOpen}>
             Connect project
           </button>
-          <button
-            className="btn"
-            onClick={() => {
-              const next = seed + 1
-              setSeed(next)
-              loadDataset(generateSample(next))
-            }}
-          >
-            New sample
-          </button>
-          <button className="btn" onClick={() => setScanOpen(!scanOpen)} aria-expanded={scanOpen}>
-            Scan codebase
-          </button>
-          <button className="btn" onClick={() => fileRef.current?.click()}>
-            Import CSV
-          </button>
-          <button className="btn" onClick={onExport}>
-            Export CSV
-          </button>
+          {plan && (
+            <button className="btn" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen}>
+              {planOpen ? 'Hide event plan' : 'Event plan'}
+            </button>
+          )}
+          <div className="menu-wrap">
+            <button className="btn" onClick={() => setDataMenuOpen(!dataMenuOpen)} aria-expanded={dataMenuOpen} aria-haspopup="menu">
+              Data ▾
+            </button>
+            {dataMenuOpen && (
+              <div className="menu" role="menu">
+                <button role="menuitem" onClick={() => (setDataMenuOpen(false), fileRef.current?.click())}>
+                  Import events CSV…
+                </button>
+                <button role="menuitem" onClick={() => (setDataMenuOpen(false), planFileRef.current?.click())}>
+                  Import event plan…
+                </button>
+                <button role="menuitem" onClick={() => (setDataMenuOpen(false), onExport())}>
+                  Export current data as CSV
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    const next = seed + 1
+                    setSeed(next)
+                    loadDataset(generateSample(next))
+                  }}
+                >
+                  Load demo data (fictional music app)
+                </button>
+              </div>
+            )}
+          </div>
           <button className="btn" onClick={() => setSettingsOpen(!settingsOpen)} title="Model & API key" aria-expanded={settingsOpen}>
             ⚙ Settings
           </button>
@@ -322,6 +308,17 @@ export default function App() {
               e.target.value = ''
             }}
           />
+          <input
+            ref={planFileRef}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) onImportPlan(f)
+              e.target.value = ''
+            }}
+          />
         </div>
       </header>
 
@@ -330,8 +327,25 @@ export default function App() {
       {wizardOpen && (
         <ConnectWizard
           onData={onWizardData}
+          onDbImport={(events, source) => {
+            try {
+              loadDataset(datasetFromEvents(events, source))
+              setWizardOpen(false)
+            } catch (err) {
+              setImportError(err instanceof Error ? err.message : String(err))
+            }
+          }}
+          onImportCsv={() => fileRef.current?.click()}
+          onImportPlanFile={() => planFileRef.current?.click()}
+          onDemo={() => {
+            const next = seed + 1
+            setSeed(next)
+            loadDataset(generateSample(next))
+            setWizardOpen(false)
+          }}
           onPlanOnly={(p) => {
             setPlan(p)
+            setPlanOpen(true)
             setWizardOpen(false)
           }}
           onClose={() => setWizardOpen(false)}
@@ -347,70 +361,13 @@ export default function App() {
         </div>
       )}
 
-      {scanOpen && (
-        <div className="scan-bar">
-          <div className="scan-bar-main">
-            <input
-              type="text"
-              className="scan-path"
-              placeholder="/path/to/your/codebase"
-              value={scanPath}
-              onChange={(e) => setScanPath(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && runScan()}
-              disabled={scanning}
-              aria-label="Codebase path"
-            />
-            <button className="btn btn-primary" onClick={runScan} disabled={scanning || !scanPath.trim()}>
-              {scanning ? 'Scanning…' : 'Scan with Claude'}
-            </button>
-            <button className="btn btn-ghost" onClick={() => planFileRef.current?.click()} disabled={scanning}>
-              …or import dotchart.events.json
-            </button>
-            <input
-              ref={planFileRef}
-              type="file"
-              accept=".json,application/json"
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) onImportPlan(f)
-                e.target.value = ''
-              }}
-            />
-          </div>
-          {scanning ? (
-            <div className="scan-status" role="status">
-              <span className="scan-pulse" aria-hidden="true" />
-              {scanStatus} <span className="scan-elapsed">{scanElapsed}s</span>
-            </div>
-          ) : (
-            <div className="scan-hint">
-              Reads the codebase server-side and asks Claude to propose the user events worth tracking (model in ⚙ Settings).
-              Also available as a CLI: <code>npm run scan -- /path/to/codebase</code>
-            </div>
-          )}
-          {scanError && <div className="scan-error">⚠ {scanError}</div>}
-          <div className="scan-divider" />
-          <DbPanel
-            onImport={(events, source) => {
-              try {
-                loadDataset(datasetFromEvents(events, source))
-                setScanOpen(false)
-              } catch (err) {
-                setScanError(err instanceof Error ? err.message : String(err))
-              }
-            }}
-          />
-        </div>
-      )}
-
-      {plan && (
+      {plan && planOpen && (
         <EventPlanPanel
           key={`${plan.meta?.generated_at ?? ''}:${plan.events.map((e) => e.key).join(',')}`}
           plan={plan}
           datasetEvents={datasetEventNames}
           onApply={applyPlan}
-          onClose={() => setPlan(null)}
+          onClose={() => setPlanOpen(false)}
         />
       )}
 
@@ -484,6 +441,7 @@ export default function App() {
                   role="listitem"
                   className={`legend-item legend-toggle${on ? '' : ' legend-off'}`}
                   aria-pressed={on}
+                  title={on ? 'Click to hide this event from the grid' : 'Click to show this event again'}
                   onClick={() => {
                     const next = new Set(enabledEvents)
                     if (on) next.delete(t.key)

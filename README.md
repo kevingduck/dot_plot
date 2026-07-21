@@ -19,8 +19,10 @@ shares, searches) so the visualization is immediately explorable.
 
 ## Connect your project (the main flow)
 
-First run opens the **Connect wizard**: give it a project path and it does the
-rest — detects the project and framework, finds the database connection in the
+First run opens the **Connect wizard**: pick your project in a folder browser
+(projects are badged automatically) or paste a GitHub URL — private repos work
+via your local git credentials or a one-time access token, never stored. From
+there DotChart does the rest — detects the project and framework, finds the database connection in the
 repo's env files (used read-only, with your consent, never leaving your
 machine), and runs one Claude analysis over the code *and* the live schema.
 You get a single review screen where every proposed event is labeled either

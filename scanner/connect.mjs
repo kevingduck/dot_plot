@@ -8,7 +8,9 @@
 //                            (importable now) or needs instrumentation.
 
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import Anthropic from '@anthropic-ai/sdk'
 import { ALLOWED_MODELS, DEFAULT_MODEL, buildDigest } from './scan.mjs'
@@ -24,6 +26,98 @@ function loadEnvKey() {
     /* no .env */
   }
   return null
+}
+
+const PROJECT_MARKERS = ['package.json', 'pyproject.toml', 'go.mod', 'Gemfile', 'Cargo.toml', 'composer.json', '.git']
+
+/** Directory listing for the in-app folder picker. Local tool: browses the user's own machine. */
+export function listDirectory(targetPath) {
+  const home = os.homedir()
+  const p = targetPath ? path.resolve(targetPath) : home
+  if (!fs.existsSync(p) || !fs.statSync(p).isDirectory()) throw new Error(`Not a directory: ${p}`)
+  const dirs = []
+  for (const e of fs.readdirSync(p, { withFileTypes: true })) {
+    if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules') continue
+    const full = path.join(p, e.name)
+    let isProject = false
+    try {
+      isProject = PROJECT_MARKERS.some((m) => fs.existsSync(path.join(full, m)))
+    } catch {
+      /* permission */
+    }
+    dirs.push({ name: e.name, path: full, isProject })
+  }
+  dirs.sort((a, b) => Number(b.isProject) - Number(a.isProject) || a.name.localeCompare(b.name))
+  const parent = path.dirname(p)
+  const isCurrentProject = PROJECT_MARKERS.some((m) => fs.existsSync(path.join(p, m)))
+  return {
+    path: p,
+    parent: parent !== p ? parent : null,
+    home,
+    isProject: isCurrentProject,
+    shortcuts: [
+      { name: 'Home', path: home },
+      { name: 'Desktop', path: path.join(home, 'Desktop') },
+      { name: 'Documents', path: path.join(home, 'Documents') },
+    ].filter((s2) => fs.existsSync(s2.path)),
+    dirs: dirs.slice(0, 200),
+  }
+}
+
+function sanitize(text, token) {
+  return token ? String(text).split(token).join('••••') : String(text)
+}
+
+export function parseGithubUrl(url) {
+  const m = url.trim().match(/(?:github\.com[/:])([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:[/?#].*)?$/)
+  if (!m) throw new Error('Could not read that as a GitHub repo URL (expected github.com/owner/repo)')
+  return { owner: m[1], repo: m[2] }
+}
+
+/** Shallow-clone (or refresh) a GitHub repo into ~/.dotchart/repos. Tokens are used once and never persisted. */
+export function cloneGithubRepo(url, token, { onStatus = () => {} } = {}) {
+  const { owner, repo } = parseGithubUrl(url)
+  const dest = path.join(os.homedir(), '.dotchart', 'repos', `${owner}__${repo}`)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  const cleanUrl = `https://github.com/${owner}/${repo}.git`
+  const authUrl = token ? `https://x-access-token:${encodeURIComponent(token)}@github.com/${owner}/${repo}.git` : cleanUrl
+  const run = (args, timeout = 300000) => execFileSync('git', args, { stdio: 'pipe', timeout, encoding: 'utf8' })
+  if (fs.existsSync(path.join(dest, '.git'))) {
+    onStatus(`Refreshing existing copy of ${owner}/${repo}…`)
+    try {
+      run(['-C', dest, 'remote', 'set-url', 'origin', authUrl])
+      run(['-C', dest, 'fetch', '--depth', '1', 'origin'], 120000)
+      run(['-C', dest, 'reset', '--hard', 'FETCH_HEAD'])
+    } catch {
+      onStatus('Refresh failed — using the existing copy as-is')
+    } finally {
+      try {
+        run(['-C', dest, 'remote', 'set-url', 'origin', cleanUrl])
+      } catch {
+        /* ignore */
+      }
+    }
+  } else {
+    onStatus(`Cloning ${owner}/${repo}${token ? ' (authenticated)' : ''}… this can take a minute for big repos`)
+    try {
+      run(['clone', '--depth', '1', authUrl, dest])
+    } catch (err) {
+      const detail = sanitize(err.stderr || err.message || '', token)
+      if (/authentication|403|404|could not read/i.test(detail)) {
+        throw new Error(
+          `Could not access ${owner}/${repo}. If it's private, paste a GitHub personal access token (github.com → Settings → Developer settings → Fine-grained tokens, with read access to this repo).`,
+        )
+      }
+      throw new Error(`Clone failed: ${detail.slice(0, 300)}`)
+    }
+    try {
+      run(['-C', dest, 'remote', 'set-url', 'origin', cleanUrl])
+    } catch {
+      /* ignore */
+    }
+  }
+  onStatus('Repository ready')
+  return { path: dest, owner, repo }
 }
 
 export function redactConnString(conn) {
