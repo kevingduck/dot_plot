@@ -118,7 +118,7 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
           <h2>Proposed event plan</h2>
           <p className="card-sub">
             {plan.meta
-              ? `Scanned ${plan.meta.scanned_path} (${plan.meta.files_included} files, ${plan.meta.model}${estimateCost(plan.meta.model, plan.meta.usage) ? `, ~${estimateCost(plan.meta.model, plan.meta.usage)}` : ''})`
+              ? `Scanned ${plan.meta.scanned_path.replace(/^local:/, '')} (${plan.meta.files_included} files, ${plan.meta.model}${estimateCost(plan.meta.model, plan.meta.usage) ? `, ~${estimateCost(plan.meta.model, plan.meta.usage)}` : ''})`
               : 'Imported plan'}{' '}
             · {accepted.size} of {plan.events.length} events accepted ·{' '}
             <strong>

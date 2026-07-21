@@ -57,6 +57,8 @@ function loadPersisted(): Persisted | null {
     if (!p.dataset?.users || !p.dataset?.events || !p.dataset?.registry) return null
     // Never restore a demo-tainted session (older builds could cache one)
     if (p.dataset.source.startsWith('Sample data')) return null
+    // Strip the internal 'local:' key prefix from cached display labels
+    if (p.dataset.source.startsWith('local:')) p.dataset.source = p.dataset.source.slice(6)
     return p
   } catch {
     return null
@@ -195,7 +197,7 @@ export default function App() {
       const demo = dataset.source.startsWith('Sample data')
       postJson('/api/projects/save', {
         path: projectKey,
-        name: projectKey.split('/').pop(),
+        name: projectKey.replace(/^local:/, '').split('/').pop(),
         dataset: demo ? null : dataset,
         plan,
         dbSync,

@@ -43,7 +43,7 @@ export function listWorkspaces() {
       const ws = JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8'))
       out.push({
         slug: ws.slug ?? f.replace(/\.json$/, ''),
-        name: ws.name ?? path.basename(ws.path ?? f),
+        name: String(ws.name ?? path.basename(ws.path ?? f)).replace(/^local:/, ''),
         path: ws.path ?? '',
         savedAt: ws.savedAt ?? 0,
         users: ws.dataset?.users?.length ?? 0,
@@ -117,11 +117,32 @@ function sanitizeWorkspace(ws, file) {
   return ws
 }
 
+/** Cosmetic normalization: the internal 'local:' key prefix must never show as a name. */
+function normalizeWorkspace(ws, file) {
+  let changed = false
+  if (typeof ws.name === 'string' && ws.name.startsWith('local:')) {
+    ws.name = ws.name.slice(6)
+    changed = true
+  }
+  if (ws.dataset?.source && String(ws.dataset.source).startsWith('local:')) {
+    ws.dataset.source = String(ws.dataset.source).slice(6)
+    changed = true
+  }
+  if (changed) {
+    try {
+      fs.writeFileSync(file, JSON.stringify(ws))
+    } catch {
+      /* display fix still applies */
+    }
+  }
+  return ws
+}
+
 export function loadWorkspace(slug) {
   if (!/^[a-z0-9-]+$/.test(slug)) throw new Error('Bad workspace id')
   const file = path.join(DIR, `${slug}.json`)
   if (!fs.existsSync(file)) throw new Error('Workspace not found')
-  return sanitizeWorkspace(JSON.parse(fs.readFileSync(file, 'utf8')), file)
+  return normalizeWorkspace(sanitizeWorkspace(JSON.parse(fs.readFileSync(file, 'utf8')), file), file)
 }
 
 export function deleteWorkspace(slug) {
