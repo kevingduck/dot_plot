@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { InstrumentPrep, InstrumentResult, PlannedEvent, PreparedEdit } from '../types'
 import { postJson, postNdjson } from '../lib/api'
 import { aiParams } from '../lib/settings'
@@ -8,6 +8,7 @@ type Phase = 'idle' | 'preparing' | 'review' | 'applying' | 'done'
 interface Props {
   defaultPath: string
   events: PlannedEvent[] // accepted events only
+  autoStart?: boolean // kick off the proposal immediately (user clicked Start tracking)
 }
 
 /** Highlight lines in new_string that aren't in old_string (edits are additive). */
@@ -35,7 +36,7 @@ function Diff({ edit }: { edit: PreparedEdit }) {
   )
 }
 
-export function InstrumentPanel({ defaultPath, events }: Props) {
+export function InstrumentPanel({ defaultPath, events, autoStart }: Props) {
   const [phase, setPhase] = useState<Phase>('idle')
   const [path, setPath] = useState(defaultPath)
   const [status, setStatus] = useState('')
@@ -45,6 +46,15 @@ export function InstrumentPanel({ defaultPath, events }: Props) {
   const [includeSdk, setIncludeSdk] = useState(true)
   const [sdkOpen, setSdkOpen] = useState(false)
   const [result, setResult] = useState<InstrumentResult | null>(null)
+
+  const startedRef = useRef(false)
+  useEffect(() => {
+    if (autoStart && !startedRef.current && phase === 'idle' && path.trim() && events.length > 0) {
+      startedRef.current = true
+      prepare()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart])
 
   const prepare = async () => {
     setPhase('preparing')

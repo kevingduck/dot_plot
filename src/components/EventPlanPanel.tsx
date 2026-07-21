@@ -57,8 +57,10 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
     [plan, datasetEvents, datasetIsDemo],
   )
   const reportingCount = useMemo(() => [...accepted].filter((k) => reportingKeys.has(k)).length, [accepted, reportingKeys])
-  // Nothing reporting yet → instrumentation IS the next step; open it
-  const [showInstrument, setShowInstrument] = useState(() => reportingKeys.size === 0 && plan.events.every((e) => !e.db_mapping?.table))
+  const [showInstrument, setShowInstrument] = useState(false)
+  // Becomes true the first time the user clicks Start tracking — from then on
+  // the panel stays mounted (hidden at most) so proposed edits are never lost
+  const [instrumentStarted, setInstrumentStarted] = useState(false)
 
   const sorted = useMemo(
     () => [...plan.events].sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier)),
@@ -125,12 +127,15 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
         </div>
         <div className="plan-actions">
           <button
-            className={reportingCount === 0 ? 'btn btn-primary' : 'btn'}
-            onClick={() => setShowInstrument(!showInstrument)}
+            className={reportingCount === 0 && !showInstrument ? 'btn btn-primary' : 'btn'}
+            onClick={() => {
+              if (!showInstrument) setInstrumentStarted(true)
+              setShowInstrument(!showInstrument)
+            }}
             aria-expanded={showInstrument}
             title="Write the track() calls into the codebase — reviewed by you, applied on a git branch"
           >
-            {reportingCount === 0 ? '⚡ Start tracking' : 'Instrument more events…'}
+            {showInstrument ? 'Hide tracking setup' : reportingCount === 0 ? '⚡ Start tracking' : 'Instrument more events…'}
           </button>
           {!(datasetIsDemo && mappedPairs.length === 0) && (
             <button
@@ -163,7 +168,7 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
       {reportingCount === 0 && (
         <p className="plan-map-hint">
           <strong>None of these events are being tracked yet</strong> — the plan describes what this codebase{' '}
-          <em>could</em> report. Click <strong>⚡ Start tracking</strong> below: DotChart writes the one-line track()
+          <em>could</em> report. Click <strong>⚡ Start tracking</strong>: DotChart proposes the one-line track()
           calls for you (you review every change; it lands on a git branch, never your working code). Once the branch is
           merged and <code>DOTCHART_INGEST_URL</code> is set, events flow in automatically and each row below flips to
           "● reporting data".
@@ -173,11 +178,14 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
         </p>
       )}
 
-      {showInstrument && (
-        <InstrumentPanel
-          defaultPath={plan.meta?.scanned_path ?? ''}
-          events={plan.events.filter((e) => accepted.has(e.key))}
-        />
+      {instrumentStarted && (
+        <div style={{ display: showInstrument ? undefined : 'none' }}>
+          <InstrumentPanel
+            autoStart
+            defaultPath={plan.meta?.scanned_path ?? ''}
+            events={plan.events.filter((e) => accepted.has(e.key))}
+          />
+        </div>
       )}
 
       <table className="plan-table">

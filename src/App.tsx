@@ -262,7 +262,7 @@ export default function App() {
         const ws = await postJson<Persisted & { path: string }>('/api/projects/load', { slug })
         loadDataset(ws.dataset)
         setPlan(ws.plan ?? null)
-        setPlanOpen(false)
+        setPlanOpen(ws.plan != null)
         setDbSync(ws.dbSync ?? null)
         setInsightsSaved(ws.insights ?? null)
         setHighlightUsers(null)
