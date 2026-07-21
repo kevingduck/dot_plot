@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { EventPlan, EventTier } from '../types'
 import { InstrumentPanel } from './InstrumentPanel'
 import { estimateCost } from '../lib/settings'
@@ -45,18 +45,49 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
   )
   const [coreKey, setCoreKey] = useState(plan.core_event)
   const datasetNames = useMemo(() => [...datasetEvents].filter((n) => n !== '__other__').sort(), [datasetEvents])
-  // plan event key -> dataset event name it corresponds to ('' = not in data)
-  const [mapping, setMapping] = useState<Map<string, string>>(
-    () => new Map(plan.events.map((e) => [e.key, guessMatch(e.key, [...datasetEvents].filter((n) => n !== '__other__'))])),
-  )
+  // plan event key -> dataset event name it corresponds to ('' = not in data).
+  // A dataset key that exactly matches a DIFFERENT plan event is never offered
+  // as a fuzzy guess (it belongs to that event).
+  const planKeySet = useMemo(() => new Set(plan.events.map((e) => e.key)), [plan])
+  const candidatesFor = (key: string, names: string[]) => names.filter((n) => n === key || !planKeySet.has(n))
+  const [mapping, setMapping] = useState<Map<string, string>>(() => {
+    const names = [...datasetEvents].filter((n) => n !== '__other__')
+    return new Map(plan.events.map((e) => [e.key, guessMatch(e.key, candidatesFor(e.key, names))]))
+  })
   const [expanded, setExpanded] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
 
-  // Which accepted events are actually reporting data right now?
-  const reportingKeys = useMemo(
-    () => new Set(plan.events.filter((e) => !datasetIsDemo && datasetEvents.has(e.key)).map((e) => e.key)),
-    [plan, datasetEvents, datasetIsDemo],
-  )
+  // New event keys can stream in after mount — keep auto-guessing matches for
+  // still-unmapped plan events (never overriding a user's choice)
+  useEffect(() => {
+    setMapping((prev) => {
+      const next = new Map(prev)
+      let changed = false
+      for (const e of plan.events) {
+        if (!next.get(e.key)) {
+          const g = guessMatch(e.key, candidatesFor(e.key, datasetNames))
+          if (g) {
+            next.set(e.key, g)
+            changed = true
+          }
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [datasetNames, plan])
+
+  // Which accepted events are reporting data — directly, or via their mapped
+  // dataset key (plan names can drift from what the app actually sends)
+  const reportingKeys = useMemo(() => {
+    const out = new Set<string>()
+    if (!datasetIsDemo) {
+      for (const e of plan.events) {
+        const mapped = mapping.get(e.key)
+        if (datasetEvents.has(e.key) || (mapped && datasetEvents.has(mapped))) out.add(e.key)
+      }
+    }
+    return out
+  }, [plan, datasetEvents, datasetIsDemo, mapping])
   const reportingCount = useMemo(() => [...accepted].filter((k) => reportingKeys.has(k)).length, [accepted, reportingKeys])
   const [showInstrument, setShowInstrument] = useState(false)
   // Becomes true the first time the user clicks Start tracking — from then on
@@ -249,7 +280,7 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
                   <div className="plan-event-desc">{e.description}</div>
                   <div className={`track-status${reportingKeys.has(e.key) ? ' track-live' : ''}`}>
                     {reportingKeys.has(e.key)
-                      ? '● reporting data'
+                      ? `● reporting data${!datasetEvents.has(e.key) && mapping.get(e.key) ? ` (as ${mapping.get(e.key)})` : ''}`
                       : e.db_mapping?.table
                         ? `◐ in your database (${e.db_mapping.table}) — import via Connect`
                         : '○ not tracked yet'}

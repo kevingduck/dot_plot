@@ -47,6 +47,7 @@ interface WorkspaceSummary {
   users: number
   events: number
   hasInsights: boolean
+  planKeys?: string[]
 }
 
 function loadPersisted(): Persisted | null {
@@ -237,11 +238,9 @@ export default function App() {
   // real users must never mix.
   const mergeLiveEvents = useCallback((incoming: { userId: string; event: string; ts: number }[]) => {
     if (datasetRef.current.source === NO_PROJECT) return // nothing to attach events to yet
-    // Only events belonging to the selected project's plan reach its grid
-    if (plan) {
-      const planKeys = new Set(plan.events.map((e) => e.key))
-      incoming = incoming.filter((e) => planKeys.has(e.event))
-    }
+    // Merge permissively: plan key names drift from what instrumented apps
+    // actually send, and key-claim heuristics eat real events. True
+    // multi-project separation comes with per-project ingest tokens.
     if (incoming.length === 0) return
     if (datasetRef.current.source.startsWith('Sample data')) {
       const ds = datasetFromEvents(incoming, 'Live tracked events')

@@ -49,6 +49,7 @@ export function listWorkspaces() {
         users: ws.dataset?.users?.length ?? 0,
         events: ws.dataset?.events?.length ?? 0,
         hasPlan: Boolean(ws.plan),
+        planKeys: (ws.plan?.events ?? []).map((e) => e.key),
         hasInsights: Boolean(ws.insights),
       })
     } catch {
