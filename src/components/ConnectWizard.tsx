@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DbSyncConfig, DiscoveredProject, EventPlan, RawEvent } from '../types'
 import { postJson, postNdjson } from '../lib/api'
 import { addRecent, aiParams, getRecents } from '../lib/settings'
+import { digestFromFileList, pickLocalFolder, type LocalDigest } from '../lib/localdigest'
 import { DbPanel } from './DbPanel'
 
 type Phase = 'pick' | 'cloning' | 'discovering' | 'discovered' | 'analyzing' | 'review' | 'importing'
@@ -21,6 +22,7 @@ interface DirListing {
 }
 
 interface Props {
+  hosted: boolean
   onData: (events: RawEvent[], source: string, plan: EventPlan, sync?: DbSyncConfig) => void
   onPlanOnly: (plan: EventPlan) => void
   onDbImport: (events: RawEvent[], source: string, sync?: DbSyncConfig) => void
@@ -98,7 +100,7 @@ function FolderPicker({ onSelect, disabled }: { onSelect: (path: string) => void
   )
 }
 
-export function ConnectWizard({ onData, onPlanOnly, onDbImport, onImportCsv, onImportPlanFile, onDemo, onClose }: Props) {
+export function ConnectWizard({ hosted, onData, onPlanOnly, onDbImport, onImportCsv, onImportPlanFile, onDemo, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>('pick')
   const [tab, setTab] = useState<'local' | 'github'>('local')
   const [ghUrl, setGhUrl] = useState('')
@@ -111,6 +113,42 @@ export function ConnectWizard({ onData, onPlanOnly, onDbImport, onImportCsv, onI
   const [plan, setPlan] = useState<EventPlan | null>(null)
   const [accepted, setAccepted] = useState<Set<string>>(new Set())
   const [days, setDays] = useState(90)
+  const [localDigest, setLocalDigest] = useState<LocalDigest | null>(null)
+  const [digesting, setDigesting] = useState(false)
+  const dirInputRef = useRef<HTMLInputElement>(null)
+
+  const useDigest = (d: LocalDigest) => {
+    if (d.included === 0) {
+      setError('No source files found in that folder')
+      return
+    }
+    setLocalDigest(d)
+    setProject({
+      root: `local:${d.name}`,
+      name: d.name,
+      framework: '',
+      files: { included: d.included, skipped: d.skipped, total: d.included + d.skipped },
+      databases: d.databases,
+    })
+    setUseDb(d.databases.length > 0)
+    setDbIndex(0)
+    setPhase('discovered')
+    setError(null)
+  }
+
+  const browserPick = async () => {
+    setDigesting(true)
+    setError(null)
+    try {
+      const d = await pickLocalFolder()
+      if (d) useDigest(d)
+      else if (typeof window.showDirectoryPicker !== 'function') dirInputRef.current?.click()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDigesting(false)
+    }
+  }
 
   const discover = async (path: string) => {
     setPhase('discovering')
@@ -149,7 +187,13 @@ export function ConnectWizard({ onData, onPlanOnly, onDbImport, onImportCsv, onI
       const conn = useDb && project.databases[dbIndex] ? project.databases[dbIndex].connectionString : undefined
       const result = await postNdjson<EventPlan>(
         '/api/connect/analyze',
-        { path: project.root, connectionString: conn, ...aiParams() },
+        localDigest
+          ? {
+              digest: { name: localDigest.name, digest: localDigest.digest, included: localDigest.included, skipped: localDigest.skipped },
+              connectionString: conn,
+              ...aiParams(),
+            }
+          : { path: project.root, connectionString: conn, ...aiParams() },
         setStatus,
       )
       setPlan(result)
@@ -220,7 +264,37 @@ export function ConnectWizard({ onData, onPlanOnly, onDbImport, onImportCsv, onI
             </button>
           </div>
 
-          {tab === 'local' && <FolderPicker onSelect={discover} disabled={phase !== 'pick'} />}
+          {tab === 'local' && !hosted && <FolderPicker onSelect={discover} disabled={phase !== 'pick'} />}
+          {tab === 'local' && hosted && (
+            <div className="wizard-github">
+              <button className="btn btn-primary" onClick={browserPick} disabled={digesting || phase !== 'pick'}>
+                {digesting ? 'Reading folder…' : '📁 Choose project folder…'}
+              </button>
+              <input
+                ref={dirInputRef}
+                type="file"
+                hidden
+                multiple
+                aria-label="Project folder"
+                {...({ webkitdirectory: '' } as Record<string, string>)}
+                onChange={async (e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    setDigesting(true)
+                    try {
+                      useDigest(await digestFromFileList(e.target.files))
+                    } finally {
+                      setDigesting(false)
+                    }
+                  }
+                  e.target.value = ''
+                }}
+              />
+              <div className="scan-hint">
+                Your browser reads the folder locally and uploads only the filtered code digest (same content that goes
+                to Claude) — the project itself never leaves your machine.
+              </div>
+            </div>
+          )}
 
           {tab === 'github' && (
             <div className="wizard-github">
@@ -300,6 +374,9 @@ export function ConnectWizard({ onData, onPlanOnly, onDbImport, onImportCsv, onI
                 <code>{project.databases[dbIndex].varName}</code>) — connect <em>read-only</em> so events already in your
                 data can be charted immediately
                 <div className="wizard-db-conn">
+                  {hosted && /localhost|127\.0\.0\.1/.test(project.databases[dbIndex].connectionString) && (
+                    <div className="scan-error">⚠ This looks like a localhost database — a hosted server can't reach it. Uncheck, or connect a cloud database URL.</div>
+                  )}
                   {project.databases.length > 1 ? (
                     <select value={dbIndex} onChange={(e) => setDbIndex(Number(e.target.value))}>
                       {project.databases.map((d, i) => (

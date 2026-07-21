@@ -1,0 +1,24 @@
+# Render blueprint for hosted DotChart.
+# Dashboard → New → Blueprint → point at this repo, then set the two secret
+# env vars when prompted. The starter plan + disk (~$7-8/mo) keeps the service
+# always-on and the event store durable across deploys — on the free plan the
+# store is wiped every deploy and cold starts drop events.
+services:
+  - type: web
+    name: dotchart
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: DOTCHART_HOSTED
+        value: '1'
+      - key: DOTCHART_PASSWORD
+        sync: false # set in dashboard — protects everything except /ingest
+      - key: ANTHROPIC_API_KEY
+        sync: false # set in dashboard — used for analyses (users can also BYO key)
+    disk:
+      name: dotchart-data
+      mountPath: /opt/render/.dotchart
+      sizeGB: 1

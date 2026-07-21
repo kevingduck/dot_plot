@@ -29,6 +29,7 @@ export function InsightCards({ model, dataset, saved, onSaved, onHighlight }: Pr
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<InsightsResponse | null>(saved)
   const [active, setActive] = useState<number | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
 
   const run = async () => {
     setLoading(true)
@@ -71,9 +72,16 @@ export function InsightCards({ model, dataset, saved, onSaved, onHighlight }: Pr
               : 'Let Claude stare at the grid for you — churn risks, activation patterns, users worth talking to.'}
           </p>
         </div>
-        <button className="btn btn-primary" onClick={run} disabled={loading}>
-          {loading ? 'Reading the grid…' : result ? '↻ Re-analyze' : '✨ Find patterns'}
-        </button>
+        <div className="plan-actions">
+          {result && !loading && (
+            <button className="btn" onClick={() => setCollapsed(!collapsed)} aria-expanded={!collapsed}>
+              {collapsed ? `Show (${result.insights.length})` : 'Hide'}
+            </button>
+          )}
+          <button className="btn btn-primary" onClick={run} disabled={loading}>
+            {loading ? 'Reading the grid…' : result ? '↻ Re-analyze' : '✨ Find patterns'}
+          </button>
+        </div>
       </div>
       {loading && (
         <div className="scan-status" role="status">
@@ -82,7 +90,7 @@ export function InsightCards({ model, dataset, saved, onSaved, onHighlight }: Pr
         </div>
       )}
       {error && <div className="scan-error">⚠ {error}</div>}
-      {result && !loading && (
+      {result && !loading && !collapsed && (
         <div className="insight-row">
           {result.insights.map((ins, i) => (
             <button

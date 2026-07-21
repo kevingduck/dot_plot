@@ -1,10 +1,19 @@
-// Client helpers for the dev-server endpoints.
+// Client helpers for the DotChart API (dev server or hosted).
+
+function authHeaders(): Record<string, string> {
+  try {
+    const key = localStorage.getItem('dotchart:access-key')
+    return key ? { 'x-dotchart-key': key } : {}
+  } catch {
+    return {}
+  }
+}
 
 /** POST returning plain JSON; throws on HTTP error or an {error} payload. */
 export async function postJson<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({ error: `Request failed (${res.status})` }))
@@ -19,9 +28,10 @@ export async function postJson<T>(url: string, body: unknown): Promise<T> {
 export async function postNdjson<T>(url: string, body: unknown, onStatus: (s: string) => void): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   })
+  if (res.status === 401) throw new Error('Password required — set it under ⚙ Settings')
   if (!res.body) throw new Error(`Request failed (${res.status})`)
   const reader = res.body.getReader()
   const decoder = new TextDecoder()

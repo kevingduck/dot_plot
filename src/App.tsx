@@ -4,6 +4,7 @@ import { COLORS, seriesColor, type Mode } from './theme'
 import { generateSample } from './data/generate'
 import { datasetFromEvents, parseCsv, toCsv } from './data/csv'
 import { postJson } from './lib/api'
+import { fetchAppMode, setAccessKey, type AppMode } from './lib/mode'
 import { buildModel, computeStats } from './lib/model'
 import { buildCohorts } from './lib/retention'
 import { DotPlot } from './components/DotPlot'
@@ -95,6 +96,23 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(() => persisted === null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [appMode, setAppMode] = useState<AppMode>({ hosted: false, authRequired: false, hasServerKey: true })
+  const [modeReady, setModeReady] = useState(false)
+  const [authOk, setAuthOk] = useState(true)
+  const [lockError, setLockError] = useState('')
+
+  useEffect(() => {
+    fetchAppMode().then((m) => {
+      setAppMode(m)
+      setModeReady(true)
+      if (m.authRequired) {
+        postJson('/api/keycheck', {}).then(
+          () => setAuthOk(true),
+          () => setAuthOk(false),
+        )
+      }
+    }, () => setModeReady(true))
+  }, [])
 
   const [rangePreset, setRangePreset] = useState('60')
   const [customFrom, setCustomFrom] = useState('')
@@ -381,6 +399,40 @@ export default function App() {
     URL.revokeObjectURL(url)
   }, [dataset])
 
+  if (!authOk) {
+    return (
+      <div className="app lock-screen">
+        <section className="card lock-card">
+          <div className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              <ShapeIcon shape="circle" color={colors.series[0]} size={14} />
+            </span>
+            <span className="brand-name">DotChart</span>
+          </div>
+          <p className="card-sub">This DotChart is password-protected.</p>
+          <form
+            className="scan-bar-main"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const pw = new FormData(e.currentTarget).get('password')
+              setAccessKey(String(pw ?? ''))
+              postJson('/api/keycheck', {}).then(
+                () => window.location.reload(),
+                () => setLockError('Wrong password'),
+              )
+            }}
+          >
+            <input type="password" name="password" className="scan-path" placeholder="Password" aria-label="Password" autoFocus />
+            <button className="btn btn-primary" type="submit">
+              Unlock
+            </button>
+          </form>
+          {lockError && <div className="scan-error">⚠ {lockError}</div>}
+        </section>
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -392,17 +444,6 @@ export default function App() {
           <span className="brand-tag">see what your users are actually doing</span>
         </div>
         <div className="topbar-actions">
-          <span className="source-label">{dataset.source}</span>
-          {liveCount > 0 && (
-            <span className="live-chip" title={`${liveCount} events received live via the ingest endpoint`}>
-              ● {liveCount} live
-            </span>
-          )}
-          {dbSync && (
-            <button className="btn" onClick={refreshDb} disabled={refreshing} title="Re-import fresh events from your database (read-only)">
-              {refreshing ? 'Refreshing…' : '↻ Refresh'}
-            </button>
-          )}
           <button className="btn btn-primary" onClick={() => setWizardOpen(!wizardOpen)} aria-expanded={wizardOpen}>
             Connect project
           </button>
@@ -490,15 +531,22 @@ export default function App() {
               </div>
             )}
           </div>
-          <button className="btn" onClick={() => setSettingsOpen(!settingsOpen)} title="Model & API key" aria-expanded={settingsOpen}>
-            ⚙ Settings
+          <button
+            className="btn btn-icon"
+            onClick={() => setSettingsOpen(!settingsOpen)}
+            title="Settings — model & API key"
+            aria-label="Settings"
+            aria-expanded={settingsOpen}
+          >
+            ⚙
           </button>
           <button
-            className="btn"
+            className="btn btn-icon"
             onClick={() => setThemePref(themePref === 'auto' ? 'dark' : themePref === 'dark' ? 'light' : 'auto')}
-            title="Toggle theme"
+            title={`Theme: ${themePref} — click to change`}
+            aria-label="Toggle theme"
           >
-            {themePref === 'auto' ? '◐ Auto' : themePref === 'dark' ? '● Dark' : '○ Light'}
+            {themePref === 'auto' ? '◐' : themePref === 'dark' ? '●' : '○'}
           </button>
           <input
             ref={fileRef}
@@ -525,10 +573,26 @@ export default function App() {
         </div>
       </header>
 
+      <div className="statusbar">
+        <span className="source-label">{dataset.source}</span>
+        {appMode.hosted && <span className="mode-chip">hosted</span>}
+        {liveCount > 0 && (
+          <span className="live-chip" title={`${liveCount} events received live via the ingest endpoint`}>
+            ● {liveCount} live
+          </span>
+        )}
+        {dbSync && (
+          <button className="btn btn-ghost statusbar-refresh" onClick={refreshDb} disabled={refreshing} title="Re-import fresh events from your database (read-only)">
+            {refreshing ? 'Refreshing…' : '↻ Refresh data'}
+          </button>
+        )}
+      </div>
+
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
 
-      {wizardOpen && (
+      {wizardOpen && modeReady && (
         <ConnectWizard
+          hosted={appMode.hosted}
           onData={onWizardData}
           onDbImport={(events, source, sync) => {
             try {

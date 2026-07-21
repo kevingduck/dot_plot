@@ -9,10 +9,27 @@ streaks, fading accounts — are visible in a way no aggregate DAU chart can sho
 
 ## Run it
 
+**Local (full features):**
+
 ```sh
 npm install
-npm run dev
+npm run dev          # UI + API on :5173/:5199 — filesystem, git, local DBs all enabled
 ```
+
+**Hosted (Render or any Node host):** deploy with `render.yaml` (Blueprint), or:
+
+```sh
+npm run build
+DOTCHART_HOSTED=1 DOTCHART_PASSWORD=… ANTHROPIC_API_KEY=… npm start
+```
+
+Hosted mode gives you an always-on ingest URL (`https://your-app/…/ingest`) and
+a dashboard reachable from anywhere, protected by the password (only `/ingest`
+and `/health` stay open — ingest is validated and capped by design). Connect
+works via the GitHub tab or the **browser folder picker**: your browser reads
+the picked folder locally and uploads only the filtered code digest — the
+project never leaves your machine. Machine-local features (server-side folder
+browsing, applying git branches, localhost databases) remain local-mode-only.
 
 Opens with a generated sample dataset (a fictional music app: plays, playlists,
 shares, searches) so the visualization is immediately explorable.

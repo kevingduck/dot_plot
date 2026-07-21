@@ -238,15 +238,24 @@ Principles:
 - Always also provide instrumentation points (real files/functions from the code, with a one-line dotchart.track(userId, 'key', props) snippet) — even db-backed events benefit from live tracking later.
 - The instrumentation snippets must reference real code locations from the provided files.`
 
-export async function analyzeProject(targetPath, connectionString, { onStatus = () => {}, model, apiKey: userKey } = {}) {
+export async function analyzeProject(targetPath, connectionString, { onStatus = () => {}, model, apiKey: userKey, prebuilt } = {}) {
   const MODEL = ALLOWED_MODELS.includes(model) ? model : DEFAULT_MODEL
   const apiKey = userKey || loadEnvKey()
   if (!apiKey) throw new Error('No API key — add yours in Settings, or put ANTHROPIC_API_KEY in the project .env')
-  const root = path.resolve(targetPath)
+  const root = prebuilt ? `local:${prebuilt.name}` : path.resolve(targetPath)
 
-  onStatus('Reading the codebase…')
-  const { digest, included, skipped } = buildDigest(root)
-  onStatus(`Read ${included} source files (~${Math.round(digest.length / 1024)} KB${skipped ? `, ${skipped} skipped by size budget` : ''})`)
+  let digest, included, skipped
+  if (prebuilt) {
+    // Digest built in the user's browser (hosted mode) — cap defensively
+    digest = String(prebuilt.digest).slice(0, 600_000)
+    included = Number(prebuilt.included) || 0
+    skipped = Number(prebuilt.skipped) || 0
+    onStatus(`Received ${included} source files (~${Math.round(digest.length / 1024)} KB) from your browser`)
+  } else {
+    onStatus('Reading the codebase…')
+    ;({ digest, included, skipped } = buildDigest(root))
+    onStatus(`Read ${included} source files (~${Math.round(digest.length / 1024)} KB${skipped ? `, ${skipped} skipped by size budget` : ''})`)
+  }
 
   let schema = null
   if (connectionString) {

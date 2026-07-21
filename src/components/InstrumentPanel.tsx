@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { InstrumentPrep, InstrumentResult, PlannedEvent, PreparedEdit } from '../types'
 import { postJson, postNdjson } from '../lib/api'
+import { getAppMode } from '../lib/mode'
 import { aiParams } from '../lib/settings'
 
 type Phase = 'idle' | 'preparing' | 'review' | 'applying' | 'done'
@@ -37,6 +38,7 @@ function Diff({ edit }: { edit: PreparedEdit }) {
 }
 
 export function InstrumentPanel({ defaultPath, events, autoStart }: Props) {
+  const hosted = getAppMode().hosted
   const [phase, setPhase] = useState<Phase>('idle')
   const [path, setPath] = useState(defaultPath)
   const [status, setStatus] = useState('')
@@ -94,6 +96,18 @@ export function InstrumentPanel({ defaultPath, events, autoStart }: Props) {
     if (next.has(id)) next.delete(id)
     else next.add(id)
     setSelected(next)
+  }
+
+  if (hosted) {
+    return (
+      <div className="instrument-wrap">
+        <p className="scan-hint" style={{ marginTop: 0 }}>
+          Code changes are applied from the <strong>local</strong> DotChart (it needs your git repo on disk): run{' '}
+          <code>npm run dev</code> on your machine, open this project there, and click Start tracking. Hosted mode keeps
+          collecting events, showing the grid, and finding insights.
+        </p>
+      </div>
+    )
   }
 
   if (phase === 'done' && result) {
