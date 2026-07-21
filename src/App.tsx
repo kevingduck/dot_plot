@@ -225,7 +225,10 @@ export default function App() {
       if (fresh.length === 0) return prev
       const users = new Map(prev.users.map((u) => [u.id, u]))
       for (const e of fresh) {
-        if (!users.has(e.userId)) users.set(e.userId, { id: e.userId, name: e.userId, platform: '—', plan: '—', country: '—' })
+        if (!users.has(e.userId)) {
+          const name = e.userId.startsWith('anon_') ? `Visitor ${e.userId.slice(5, 11)}` : e.userId
+          users.set(e.userId, { id: e.userId, name, platform: '—', plan: '—', country: '—' })
+        }
       }
       const events = [...prev.events, ...fresh].sort((a, b) => a.ts - b.ts)
       let registry = prev.registry
@@ -303,15 +306,19 @@ export default function App() {
         if (ws.dataset) {
           loadDataset(ws.dataset)
         } else {
-          // Workspace saved before real data existed — chart the live store
+          // Workspace saved before real data existed — chart the live store,
+          // or an empty waiting state. NEVER demo data inside a project.
           const store = await postJson<{ events: { userId: string; event: string; ts: number }[] }>('/api/store/events', {})
+          const name = (ws as { name?: string }).name ?? slug
           if (store.events.length > 0 && ws.plan) {
-            const ds = datasetFromEvents(store.events, 'Live tracked events')
+            const ds = datasetFromEvents(store.events, `${name} (live tracked events)`)
             const registry = registryFromPlan(new Set(ds.events.map((e) => e.event)), ws.plan.events, ws.plan.core_event)
             loadDataset(registry ? { ...ds, registry } : ds)
             mergedCountRef.current = store.events.length
           } else {
-            loadDataset(generateSample(seed))
+            const planKeys = ws.plan ? new Set(ws.plan.events.map((e) => e.key)) : new Set<string>()
+            const registry = ws.plan ? registryFromPlan(planKeys, ws.plan.events, ws.plan.core_event) ?? [] : []
+            loadDataset({ users: [], events: [], registry, source: `${name} — waiting for first events` })
           }
         }
         setPlan(ws.plan ?? null)
@@ -774,7 +781,16 @@ export default function App() {
             })}
           </div>
         </div>
-        {model.rows.length > 0 ? (
+        {dataset.events.length === 0 ? (
+          <div className="empty-note waiting-note">
+            <span className="scan-pulse" aria-hidden="true" />
+            <div>
+              <strong>Waiting for the first event.</strong> This project has no data yet — as soon as the instrumented
+              app sends its first <code>track()</code> call to the ingest endpoint, it appears here (checked every ~15
+              seconds, no reload needed).
+            </div>
+          </div>
+        ) : model.rows.length > 0 ? (
           <DotPlot
             model={model}
             registry={dataset.registry}

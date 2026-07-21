@@ -1147,6 +1147,16 @@ button.picker-row:hover {
   text-align: center;
   font-size: 13px;
 }
+.waiting-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  text-align: left;
+  max-width: 62ch;
+  margin: 0 auto;
+  color: var(--text-secondary);
+}
 
 /* ---- drawer ---- */
 .drawer-backdrop {
