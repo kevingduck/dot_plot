@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { EventPlan, EventTier } from '../types'
 import { InstrumentPanel } from './InstrumentPanel'
 import { estimateCost } from '../lib/settings'
+import { getAppMode } from '../lib/mode'
 
 const TIER_ORDER: EventTier[] = ['core', 'activation', 'feature', 'noise']
 const TIER_LABEL: Record<EventTier, string> = {
@@ -178,7 +179,28 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
         </p>
       )}
 
-      {instrumentStarted && (
+      {instrumentStarted && getAppMode().hosted && (
+        <div className="instrument-wrap" style={{ display: showInstrument ? undefined : 'none' }}>
+          {reportingCount > 0 ? (
+            <p className="scan-hint" style={{ marginTop: 0 }}>
+              <strong>✓ Tracking is live.</strong> {reportingCount} of {accepted.size} accepted events are already
+              reporting from your deployed app — there's nothing more to set up here. The remaining events start
+              reporting automatically once the app sends them; to add their track() calls, each event's "Where" column
+              has the exact snippet and location.
+            </p>
+          ) : (
+            <p className="scan-hint" style={{ marginTop: 0 }}>
+              <strong>Getting the track() calls into your code, from the hosted app:</strong> either run DotChart
+              locally (<code>npm run dev</code>) and open this project there — it writes the changes for you on a git
+              branch — or copy each event's snippet from the "Where" column below into the shown file by hand. Once the
+              instrumented app is deployed with its ingest URL set to <code>{window.location.origin}/ingest</code>,
+              events appear here automatically. Already deployed the instrumentation? Then you're done — just wait for
+              the first event.
+            </p>
+          )}
+        </div>
+      )}
+      {instrumentStarted && !getAppMode().hosted && (
         <div style={{ display: showInstrument ? undefined : 'none' }}>
           <InstrumentPanel
             autoStart

@@ -91,6 +91,12 @@ function relTime(ts: number): string {
   return `${Math.round(s / 86400)}d ago`
 }
 
+const NO_PROJECT = 'No project connected'
+
+function emptyDataset(): Dataset {
+  return { users: [], events: [], registry: [], source: NO_PROJECT }
+}
+
 const RANGES: [string, string][] = [
   ['14', 'Last 14 days'],
   ['30', 'Last 30 days'],
@@ -102,7 +108,7 @@ const RANGES: [string, string][] = [
 export default function App() {
   const [persisted] = useState<Persisted | null>(loadPersisted)
   const [seed, setSeed] = useState(1)
-  const [dataset, setDataset] = useState<Dataset>(() => persisted?.dataset ?? generateSample(1))
+  const [dataset, setDataset] = useState<Dataset>(() => persisted?.dataset ?? emptyDataset())
   const datasetRef = useRef<Dataset>(dataset)
   datasetRef.current = dataset
   const [importError, setImportError] = useState<string | null>(null)
@@ -168,6 +174,20 @@ export default function App() {
   }, [])
   useEffect(refreshWorkspaces, [refreshWorkspaces])
 
+  // Fresh session? Open straight into the most recently used project.
+  const bootedRef = useRef(false)
+  useEffect(() => {
+    if (bootedRef.current || persisted !== null) return
+    bootedRef.current = true
+    postJson<{ projects: WorkspaceSummary[] }>('/api/projects/list', {}).then((r) => {
+      if (r.projects.length > 0) {
+        loadWorkspace(r.projects[0].slug)
+        setWizardOpen(false)
+      }
+    }, () => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Autosave the active project's workspace (debounced) whenever it changes
   useEffect(() => {
     if (!projectKey) return
@@ -188,7 +208,7 @@ export default function App() {
   // Persist real data (not the regenerable sample) across reloads
   useEffect(() => {
     try {
-      if (dataset.source.startsWith('Sample data')) {
+      if (dataset.source.startsWith('Sample data') || dataset.source === NO_PROJECT) {
         localStorage.removeItem(STORE_KEY)
         return
       }
@@ -214,6 +234,12 @@ export default function App() {
   // If the grid is showing demo data, real events REPLACE it — fictional and
   // real users must never mix.
   const mergeLiveEvents = useCallback((incoming: { userId: string; event: string; ts: number }[]) => {
+    if (datasetRef.current.source === NO_PROJECT) return // nothing to attach events to yet
+    // Only events belonging to the selected project's plan reach its grid
+    if (plan) {
+      const planKeys = new Set(plan.events.map((e) => e.key))
+      incoming = incoming.filter((e) => planKeys.has(e.event))
+    }
     if (incoming.length === 0) return
     if (datasetRef.current.source.startsWith('Sample data')) {
       const ds = datasetFromEvents(incoming, 'Live tracked events')
@@ -783,7 +809,14 @@ export default function App() {
             })}
           </div>
         </div>
-        {dataset.events.length === 0 ? (
+        {dataset.source === NO_PROJECT ? (
+          <div className="empty-note waiting-note">
+            <div>
+              <strong>Nothing here yet.</strong> Click <strong>Connect project</strong> to analyze your app, pick a
+              saved project from <strong>Projects ▾</strong>, or load the demo from <strong>Data ▾</strong> to explore.
+            </div>
+          </div>
+        ) : dataset.events.length === 0 ? (
           <div className="empty-note waiting-note">
             <span className="scan-pulse" aria-hidden="true" />
             <div>
