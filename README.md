@@ -17,7 +17,19 @@ npm run dev
 Opens with a generated sample dataset (a fictional music app: plays, playlists,
 shares, searches) so the visualization is immediately explorable.
 
-## Scan a codebase for events
+## Connect your project (the main flow)
+
+First run opens the **Connect wizard**: give it a project path and it does the
+rest — detects the project and framework, finds the database connection in the
+repo's env files (used read-only, with your consent, never leaving your
+machine), and runs one Claude analysis over the code *and* the live schema.
+You get a single review screen where every proposed event is labeled either
+**"already in your database"** (imports immediately — zero code changes) or
+**"needs a one-line code change"** (goes on a git branch via the
+instrumentation flow). One click — *Show me my users* — and the grid shows
+your real users with the plan's labels. Data and plan persist across reloads.
+
+## Scan a codebase for events (advanced / à la carte)
 
 The differentiating piece: point DotChart at a repo and Claude proposes the
 analytics events worth tracking — a ranked plan of value/activation/feature

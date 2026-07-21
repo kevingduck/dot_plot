@@ -1,0 +1,223 @@
+// DotChart Connect: the one-pointer setup flow.
+//   discoverProject(path)  — fast, no AI: project name, file count, database
+//                            connection strings found in the repo's env files
+//   analyzeProject(path, connectionString?, onStatus) — one Claude pass over
+//                            the code digest AND the live DB schema (if
+//                            consented), returning a unified event proposal:
+//                            each event either maps to an existing table
+//                            (importable now) or needs instrumentation.
+
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import Anthropic from '@anthropic-ai/sdk'
+import { buildDigest } from './scan.mjs'
+import { scanDatabase } from './dbscan.mjs'
+
+const MODEL = 'claude-opus-4-8'
+
+function loadEnvKey() {
+  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+  try {
+    const m = fs.readFileSync(path.join(projectRoot, '.env'), 'utf8').match(/^ANTHROPIC_API_KEY=(.+)$/m)
+    if (m) return m[1].trim()
+  } catch {
+    /* no .env */
+  }
+  return null
+}
+
+export function redactConnString(conn) {
+  return conn.replace(/:\/\/([^:@/]+):[^@]+@/, '://$1:••••@')
+}
+
+/** Fast, local-only discovery. Reads env files but sends nothing anywhere. */
+export function discoverProject(targetPath) {
+  const root = path.resolve(targetPath)
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`Not a directory: ${root}`)
+
+  let name = path.basename(root)
+  let framework = ''
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+    if (pkg.name) name = pkg.name
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies }
+    framework =
+      ['next', 'nuxt', 'react', 'vue', 'svelte', 'express', 'fastify', 'rails']
+        .filter((f) => deps?.[f])
+        .join(' + ') || ''
+    if (deps?.['@prisma/client'] || deps?.prisma) framework += (framework ? ' + ' : '') + 'prisma'
+  } catch {
+    /* not a node project */
+  }
+
+  // Look for database connection strings in env files (values stay local;
+  // only a redacted form is shown in the UI)
+  const databases = []
+  const envFiles = ['.env', '.env.local', '.env.development', '.env.development.local', 'config/database.yml']
+  for (const f of envFiles) {
+    const full = path.join(root, f)
+    if (!fs.existsSync(full)) continue
+    let text
+    try {
+      text = fs.readFileSync(full, 'utf8')
+    } catch {
+      continue
+    }
+    for (const m of text.matchAll(/^\s*(?:export\s+)?([A-Z0-9_]*(?:DATABASE|POSTGRES|PG)[A-Z0-9_]*)\s*=\s*["']?(postgres(?:ql)?:\/\/[^"'\s]+)["']?/gim)) {
+      if (!databases.some((d) => d.connectionString === m[2])) {
+        databases.push({ envFile: f, varName: m[1], connectionString: m[2], redacted: redactConnString(m[2]) })
+      }
+    }
+  }
+
+  const { included, skipped, totalFiles } = (() => {
+    try {
+      const d = buildDigest(root)
+      return { included: d.included, skipped: d.skipped, totalFiles: d.totalFiles }
+    } catch {
+      return { included: 0, skipped: 0, totalFiles: 0 }
+    }
+  })()
+
+  return { root, name, framework, files: { included, skipped, total: totalFiles }, databases }
+}
+
+const CONNECT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['product_summary', 'core_event', 'events'],
+  properties: {
+    product_summary: { type: 'string', description: 'Two or three sentences: what this product does and who its users are' },
+    core_event: { type: 'string', description: 'Key of the single event that best represents core value delivered' },
+    events: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['key', 'label', 'description', 'tier', 'confidence', 'rationale', 'instrumentation', 'db_mapping'],
+        properties: {
+          key: { type: 'string', description: 'snake_case past-tense event key' },
+          label: { type: 'string' },
+          description: { type: 'string' },
+          tier: { type: 'string', enum: ['core', 'activation', 'feature', 'noise'] },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+          rationale: { type: 'string' },
+          instrumentation: {
+            type: 'array',
+            description: 'Where a track() call would go in the code (always provide, even for db-backed events)',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['file', 'location', 'snippet'],
+              properties: {
+                file: { type: 'string' },
+                location: { type: 'string' },
+                snippet: { type: 'string' },
+              },
+            },
+          },
+          db_mapping: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['table', 'user_column', 'timestamp_column'],
+            description:
+              'If rows in an existing database table ALREADY record this event, name the table and columns; use empty strings when the event is not derivable from the database',
+            properties: {
+              table: { type: 'string' },
+              user_column: { type: 'string' },
+              timestamp_column: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+  },
+}
+
+const CONNECT_SYSTEM = `You are DotChart's project analyzer. DotChart shows a per-user, per-day dot plot of product usage. Given a codebase (and, when provided, the live database schema), propose the analytics events the team should track.
+
+Principles:
+- Prefer VALUE events (user got what they came for) over vanity events (opened app, signed in). Vanity events get tier "noise" with an explanation.
+- Exactly one core event; a few "activation" (aha moments predicting retention) and "feature" events. 4-10 total.
+- Keys are snake_case past-tense verbs.
+- WHEN A DATABASE SCHEMA IS PROVIDED: for each event, check whether an existing table already records it (a row insert = the event happening). If so, fill db_mapping with that table and its user/timestamp columns chosen from the schema — the event can then be charted from existing data with zero code changes. Use EXACT table and column names from the schema. If no table records it, leave db_mapping fields as empty strings.
+- Always also provide instrumentation points (real files/functions from the code, with a one-line dotchart.track(userId, 'key', props) snippet) — even db-backed events benefit from live tracking later.
+- The instrumentation snippets must reference real code locations from the provided files.`
+
+export async function analyzeProject(targetPath, connectionString, { onStatus = () => {} } = {}) {
+  const apiKey = loadEnvKey()
+  if (!apiKey) throw new Error('No ANTHROPIC_API_KEY found (env var or .env in project root)')
+  const root = path.resolve(targetPath)
+
+  onStatus('Reading the codebase…')
+  const { digest, included, skipped } = buildDigest(root)
+  onStatus(`Read ${included} source files (~${Math.round(digest.length / 1024)} KB${skipped ? `, ${skipped} skipped by size budget` : ''})`)
+
+  let schema = null
+  if (connectionString) {
+    onStatus('Introspecting the database (read-only)…')
+    try {
+      schema = await scanDatabase(connectionString)
+      onStatus(`Found ${schema.tables.length} tables (${schema.tables.filter((t) => t.eligible).length} look like event streams)`)
+    } catch (err) {
+      onStatus(`Database introspection failed (${err.message}) — continuing with code only`)
+      schema = null
+    }
+  }
+
+  const schemaBlock = schema
+    ? `\n\nLIVE DATABASE SCHEMA (public):\n${schema.tables
+        .map((t) => `${t.table} (~${t.approx_rows} rows): ${t.columns.join(', ')}`)
+        .join('\n')}`
+    : ''
+
+  onStatus(`Asking ${MODEL} to analyze the product…`)
+  const client = new Anthropic({ apiKey })
+  const stream = client.messages.stream({
+    model: MODEL,
+    max_tokens: 32000,
+    thinking: { type: 'adaptive' },
+    system: CONNECT_SYSTEM,
+    output_config: { format: { type: 'json_schema', schema: CONNECT_SCHEMA } },
+    messages: [{ role: 'user', content: `Analyze this product and propose its analytics event plan.${schemaBlock}\n\nCODEBASE:\n\n${digest}` }],
+  })
+  let drafted = 0
+  stream.on('text', (_, snapshot) => {
+    const n = (snapshot.match(/"key"\s*:/g) || []).length
+    if (n > drafted) {
+      drafted = n
+      onStatus(`Drafting the event plan — ${n} event${n === 1 ? '' : 's'}…`)
+    }
+  })
+  const message = await stream.finalMessage()
+  if (message.stop_reason === 'refusal') throw new Error('Model declined the request')
+  if (message.stop_reason === 'max_tokens') throw new Error('Response truncated — try a smaller codebase')
+  const plan = JSON.parse(message.content.filter((b) => b.type === 'text').map((b) => b.text).join(''))
+
+  // Validate db mappings against the real schema; downgrade invalid ones to
+  // instrumentation-only so the import step can trust every mapping blindly.
+  const known = new Map((schema?.tables ?? []).map((t) => [t.table, new Set(t.columns)]))
+  for (const e of plan.events) {
+    const m = e.db_mapping
+    const valid =
+      m && m.table && known.has(m.table) && known.get(m.table).has(m.user_column) && known.get(m.table).has(m.timestamp_column)
+    if (!valid) e.db_mapping = { table: '', user_column: '', timestamp_column: '' }
+  }
+  const dbBacked = plan.events.filter((e) => e.db_mapping.table).length
+  onStatus(`Proposal ready: ${plan.events.length} events, ${dbBacked} already in your database`)
+
+  return {
+    ...plan,
+    meta: {
+      scanned_path: root,
+      files_included: included,
+      files_skipped: skipped,
+      model: MODEL,
+      generated_at: new Date().toISOString(),
+      db_connected: Boolean(schema),
+      usage: { input_tokens: message.usage.input_tokens, output_tokens: message.usage.output_tokens },
+    },
+  }
+}

@@ -324,6 +324,99 @@ body {
   margin-top: 3px;
 }
 
+/* ---- connect wizard ---- */
+.wizard .card-sub {
+  font-size: 13px;
+}
+.btn-link {
+  font: inherit;
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.wizard-found {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.wizard-project-name {
+  font-size: 16px;
+  font-weight: 700;
+}
+.wizard-db {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border: 1px solid var(--gridline);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+.wizard-db-conn {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.wizard-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.wizard-events {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 14px;
+}
+.wizard-event {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  border: 1px solid var(--gridline);
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.wizard-event-off {
+  opacity: 0.45;
+}
+.wizard-event-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 600;
+  font-size: 13px;
+}
+.wizard-event-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  max-width: 82ch;
+}
+.src-chip {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1.5px 8px;
+  border-radius: 999px;
+}
+.src-db {
+  background: color-mix(in srgb, #0ca30c 14%, transparent);
+  color: var(--text-primary);
+}
+.src-code {
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+}
+
 /* ---- db panel ---- */
 .db-review {
   margin-top: 10px;

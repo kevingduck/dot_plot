@@ -12,6 +12,7 @@ import { StatTiles } from './components/StatTiles'
 import { UserDrawer } from './components/UserDrawer'
 import { EventPlanPanel } from './components/EventPlanPanel'
 import { DbPanel } from './components/DbPanel'
+import { ConnectWizard } from './components/ConnectWizard'
 import { ShapeIcon } from './components/ShapeIcon'
 
 type ThemePref = 'auto' | 'light' | 'dark'
@@ -27,6 +28,45 @@ function useMode(pref: ThemePref): Mode {
   return pref === 'auto' ? (osDark ? 'dark' : 'light') : pref
 }
 
+const STORE_KEY = 'dotchart:v1'
+
+interface Persisted {
+  dataset: Dataset
+  plan: EventPlan | null
+}
+
+function loadPersisted(): Persisted | null {
+  try {
+    const raw = localStorage.getItem(STORE_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as Persisted
+    if (!p.dataset?.users || !p.dataset?.events || !p.dataset?.registry) return null
+    return p
+  } catch {
+    return null
+  }
+}
+
+/** Registry built from plan events that exist in the data (core first, top 4 get symbols). */
+function registryFromPlan(names: Set<string>, accepted: { key: string; label: string }[], coreKey: string): EventType[] | null {
+  const present = accepted.filter((e) => names.has(e.key))
+  if (present.length === 0) return null
+  const ordered = [...present.filter((e) => e.key === coreKey), ...present.filter((e) => e.key !== coreKey)]
+  const shapes = ['circle', 'square', 'diamond', 'triangle'] as const
+  const registry: EventType[] = ordered.slice(0, 4).map((e, i) => ({
+    key: e.key,
+    label: e.label,
+    shape: shapes[i],
+    slot: i,
+    core: i === 0,
+  }))
+  const covered = new Set(registry.map((t) => t.key))
+  if ([...names].some((n) => !covered.has(n))) {
+    registry.push({ key: '__other__', label: 'Other', shape: 'dot', slot: -1, core: false })
+  }
+  return registry
+}
+
 const RANGES: [string, string][] = [
   ['14', 'Last 14 days'],
   ['30', 'Last 30 days'],
@@ -36,9 +76,11 @@ const RANGES: [string, string][] = [
 ]
 
 export default function App() {
+  const [persisted] = useState<Persisted | null>(loadPersisted)
   const [seed, setSeed] = useState(1)
-  const [dataset, setDataset] = useState<Dataset>(() => generateSample(1))
+  const [dataset, setDataset] = useState<Dataset>(() => persisted?.dataset ?? generateSample(1))
   const [importError, setImportError] = useState<string | null>(null)
+  const [wizardOpen, setWizardOpen] = useState(() => persisted === null)
 
   const [rangePreset, setRangePreset] = useState('60')
   const [customFrom, setCustomFrom] = useState('')
@@ -62,8 +104,22 @@ export default function App() {
   const [scanStartedAt, setScanStartedAt] = useState(0)
   const [scanElapsed, setScanElapsed] = useState(0)
   const [scanError, setScanError] = useState<string | null>(null)
-  const [plan, setPlan] = useState<EventPlan | null>(null)
+  const [plan, setPlan] = useState<EventPlan | null>(persisted?.plan ?? null)
   const planFileRef = useRef<HTMLInputElement>(null)
+
+  // Persist real data (not the regenerable sample) across reloads
+  useEffect(() => {
+    try {
+      if (dataset.source.startsWith('Sample data')) {
+        localStorage.removeItem(STORE_KEY)
+        return
+      }
+      const raw = JSON.stringify({ dataset, plan })
+      if (raw.length < 4_500_000) localStorage.setItem(STORE_KEY, raw)
+    } catch {
+      /* quota exceeded — skip persistence */
+    }
+  }, [dataset, plan])
   const mode = useMode(themePref)
   const colors = COLORS[mode]
   const fileRef = useRef<HTMLInputElement>(null)
@@ -161,26 +217,24 @@ export default function App() {
   // (labels, shapes, core flag), everything else folds into "Other".
   const applyPlan = useCallback(
     (accepted: { key: string; label: string }[], coreKey: string) => {
-      const names = new Set(dataset.events.map((e) => e.event))
-      const present = accepted.filter((e) => names.has(e.key))
-      if (present.length === 0) return
-      const ordered = [...present.filter((e) => e.key === coreKey), ...present.filter((e) => e.key !== coreKey)]
-      const shapes = ['circle', 'square', 'diamond', 'triangle'] as const
-      const registry: EventType[] = ordered.slice(0, 4).map((e, i) => ({
-        key: e.key,
-        label: e.label,
-        shape: shapes[i],
-        slot: i,
-        core: i === 0,
-      }))
-      const covered = new Set(registry.map((t) => t.key))
-      if ([...names].some((n) => !covered.has(n))) {
-        registry.push({ key: '__other__', label: 'Other', shape: 'dot' as const, slot: -1, core: false })
-      }
+      const registry = registryFromPlan(new Set(dataset.events.map((e) => e.event)), accepted, coreKey)
+      if (!registry) return
       setDataset((prev) => ({ ...prev, registry, source: `${prev.source.replace(/ \+ event plan$/, '')} + event plan` }))
       setEnabledEvents(new Set(registry.map((t) => t.key)))
     },
     [dataset],
+  )
+
+  // Connect wizard completion: real data + the plan arrive together
+  const onWizardData = useCallback(
+    (events: { userId: string; event: string; ts: number }[], source: string, wizardPlan: EventPlan) => {
+      const ds = datasetFromEvents(events, source)
+      const registry = registryFromPlan(new Set(ds.events.map((e) => e.event)), wizardPlan.events, wizardPlan.core_event)
+      loadDataset(registry ? { ...ds, registry } : ds)
+      setPlan(wizardPlan)
+      setWizardOpen(false)
+    },
+    [loadDataset],
   )
 
   const onImportPlan = useCallback((file: File) => {
@@ -222,6 +276,9 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           <span className="source-label">{dataset.source}</span>
+          <button className="btn btn-primary" onClick={() => setWizardOpen(!wizardOpen)} aria-expanded={wizardOpen}>
+            Connect project
+          </button>
           <button
             className="btn"
             onClick={() => {
@@ -261,6 +318,17 @@ export default function App() {
           />
         </div>
       </header>
+
+      {wizardOpen && (
+        <ConnectWizard
+          onData={onWizardData}
+          onPlanOnly={(p) => {
+            setPlan(p)
+            setWizardOpen(false)
+          }}
+          onClose={() => setWizardOpen(false)}
+        />
+      )}
 
       {importError && (
         <div className="import-error" role="alert">

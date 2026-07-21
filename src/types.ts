@@ -77,6 +77,17 @@ export interface PlannedEvent {
   confidence: 'high' | 'medium' | 'low'
   rationale: string
   instrumentation: InstrumentationPoint[]
+  // Connect wizard: filled when an existing DB table already records this
+  // event (empty strings = needs instrumentation)
+  db_mapping?: { table: string; user_column: string; timestamp_column: string }
+}
+
+export interface DiscoveredProject {
+  root: string
+  name: string
+  framework: string
+  files: { included: number; skipped: number; total: number }
+  databases: { envFile: string; varName: string; connectionString: string; redacted: string }[]
 }
 
 export interface PreparedEdit {

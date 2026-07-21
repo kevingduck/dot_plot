@@ -64,6 +64,28 @@ function scannerApi(): Plugin {
           res.end()
         }
 
+      // Connect wizard: fast local discovery (no AI)
+      server.middlewares.use(
+        '/api/connect/discover',
+        json(async (body) => {
+          const { path: targetPath } = body as { path?: string }
+          if (!targetPath) throw new Error('Body must be {"path": "..."}')
+          const { discoverProject } = await import('./scanner/connect.mjs')
+          return discoverProject(targetPath)
+        }),
+      )
+
+      // Connect wizard: unified code + schema analysis (streams progress)
+      server.middlewares.use(
+        '/api/connect/analyze',
+        ndjson(async (body, onStatus) => {
+          const { path: targetPath, connectionString } = body as { path?: string; connectionString?: string }
+          if (!targetPath) throw new Error('Body must be {"path": "...", "connectionString?": "..."}')
+          const { analyzeProject } = await import('./scanner/connect.mjs')
+          return analyzeProject(targetPath, connectionString || undefined, { onStatus })
+        }),
+      )
+
       // Propose instrumentation edits (read-only; streams progress)
       server.middlewares.use(
         '/api/instrument/prepare',
