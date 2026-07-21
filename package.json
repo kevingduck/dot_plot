@@ -7,7 +7,8 @@
     "dev": "vite",
     "scan": "node scanner/scan.mjs",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "ingest": "node scanner/ingest-server.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.3",

@@ -117,12 +117,19 @@ export function InstrumentPanel({ defaultPath, events, autoStart }: Props) {
           </div>
           <div className="instrument-cmds">
             <div className="stat-label">Turn it on (after merging)</div>
-            <pre className="instr-snippet">{`# in the app's environment (.env), then restart it:
-DOTCHART_INGEST_URL=http://localhost:5199/ingest`}</pre>
+            <pre className="instr-snippet">{`# server-side apps — set in the environment (.env), then restart:
+DOTCHART_INGEST_URL=http://localhost:5199/ingest
+
+# static pages / browser-only apps — env vars never reach the browser;
+# add one line to the HTML instead, before the app's scripts:
+<script>window.DOTCHART_INGEST_URL = 'http://localhost:5199/ingest'</script>`}</pre>
           </div>
           <p className="scan-hint">
-            Until that variable is set the instrumentation is inert — merged as-is, it changes nothing at runtime. With
-            it set, every tracked action lands here and appears on the grid within ~15 seconds, no reload needed.
+            Until that URL is set the instrumentation is inert — merged as-is, it changes nothing at runtime. With it
+            set, every tracked action lands here and appears on the grid within ~15 seconds, no reload needed. Deployed
+            somewhere public (Render, Vercel, …)? <code>localhost</code> isn't reachable from the internet — run{' '}
+            <code>npm run ingest</code> plus a tunnel (e.g. <code>ngrok http 5299</code>) and use the tunnel URL +{' '}
+            <code>/ingest</code> instead.
           </p>
           {result.skipped.length > 0 && (
             <p className="scan-hint">Skipped (didn't apply cleanly): {result.skipped.map((s) => `${s.file} (${s.reason})`).join('; ')}</p>
