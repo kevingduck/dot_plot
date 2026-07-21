@@ -186,6 +186,36 @@ body {
   font-size: 13px;
   color: var(--text-primary);
 }
+.scan-status {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.scan-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: scan-pulse 1.2s ease-in-out infinite;
+}
+@keyframes scan-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+.scan-elapsed {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
 
 /* ---- event plan ---- */
 .plan-actions {

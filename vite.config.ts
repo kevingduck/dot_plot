@@ -17,23 +17,34 @@ function scannerApi(): Plugin {
         let body = ''
         req.on('data', (chunk) => (body += chunk))
         req.on('end', async () => {
-          res.setHeader('content-type', 'application/json')
+          const log = (s: string) => server.config.logger.info(`[dotchart scan] ${s}`)
+          // NDJSON progress stream: {"status"} lines while working, then one
+          // final {"done", "plan"} or {"error"} line.
+          res.setHeader('content-type', 'application/x-ndjson')
+          res.setHeader('cache-control', 'no-cache')
+          const send = (obj: unknown) => res.write(JSON.stringify(obj) + '\n')
           try {
             const { path: targetPath } = JSON.parse(body || '{}')
             if (!targetPath || typeof targetPath !== 'string') {
-              res.statusCode = 400
-              res.end(JSON.stringify({ error: 'Body must be {"path": "/path/to/codebase"}' }))
+              send({ error: 'Body must be {"path": "/path/to/codebase"}' })
+              res.end()
               return
             }
             const { scanCodebase } = await import('./scanner/scan.mjs')
             const plan = await scanCodebase(targetPath, {
-              onStatus: (s: string) => server.config.logger.info(`[dotchart scan] ${s}`),
+              onStatus: (s: string) => {
+                log(s)
+                send({ status: s })
+              },
             })
-            res.end(JSON.stringify(plan))
+            log(`Done: ${plan.events.length} events (core: ${plan.core_event}; ${plan.meta.usage.input_tokens} in / ${plan.meta.usage.output_tokens} out tokens)`)
+            send({ done: true, plan })
           } catch (err) {
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }))
+            const msg = err instanceof Error ? err.message : String(err)
+            log(`FAILED: ${msg}`)
+            send({ error: msg })
           }
+          res.end()
         })
       })
     },

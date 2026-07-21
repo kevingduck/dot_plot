@@ -11,10 +11,12 @@ const TIER_LABEL: Record<EventTier, string> = {
 
 interface Props {
   plan: EventPlan
+  datasetEvents: Set<string>
+  onApply: (accepted: { key: string; label: string }[], coreKey: string) => void
   onClose: () => void
 }
 
-export function EventPlanPanel({ plan, onClose }: Props) {
+export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props) {
   const [accepted, setAccepted] = useState<Set<string>>(
     () => new Set(plan.events.filter((e) => e.tier !== 'noise').map((e) => e.key)),
   )
@@ -25,6 +27,10 @@ export function EventPlanPanel({ plan, onClose }: Props) {
   const sorted = useMemo(
     () => [...plan.events].sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier)),
     [plan],
+  )
+  const matchedCount = useMemo(
+    () => [...accepted].filter((k) => datasetEvents.has(k)).length,
+    [accepted, datasetEvents],
   )
 
   const toggle = (key: string) => {
@@ -70,6 +76,23 @@ export function EventPlanPanel({ plan, onClose }: Props) {
           </p>
         </div>
         <div className="plan-actions">
+          <button
+            className="btn btn-primary"
+            disabled={matchedCount === 0}
+            title={
+              matchedCount === 0
+                ? 'None of the accepted event keys exist in the current dataset yet — instrument your app or import matching data'
+                : 'Use the accepted events as the grid legend (labels, symbols, core event)'
+            }
+            onClick={() =>
+              onApply(
+                sorted.filter((e) => accepted.has(e.key)).map((e) => ({ key: e.key, label: e.label })),
+                coreKey,
+              )
+            }
+          >
+            Apply to grid ({matchedCount} in data)
+          </button>
           <button className="btn" onClick={exportAccepted}>
             Export accepted plan
           </button>

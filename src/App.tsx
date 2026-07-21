@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Dataset, EventPlan, SortKey } from './types'
+import type { Dataset, EventPlan, EventType, SortKey } from './types'
 import { COLORS, seriesColor, type Mode } from './theme'
 import { generateSample } from './data/generate'
 import { parseCsv, toCsv } from './data/csv'
@@ -56,6 +56,9 @@ export default function App() {
   const [scanOpen, setScanOpen] = useState(false)
   const [scanPath, setScanPath] = useState('')
   const [scanning, setScanning] = useState(false)
+  const [scanStatus, setScanStatus] = useState('')
+  const [scanStartedAt, setScanStartedAt] = useState(0)
+  const [scanElapsed, setScanElapsed] = useState(0)
   const [scanError, setScanError] = useState<string | null>(null)
   const [plan, setPlan] = useState<EventPlan | null>(null)
   const planFileRef = useRef<HTMLInputElement>(null)
@@ -105,6 +108,7 @@ export default function App() {
 
   const cohorts = useMemo(() => buildCohorts(dataset, new Set(model.rows.map((r) => r.user.id))), [dataset, model])
 
+  const datasetEventNames = useMemo(() => new Set(dataset.events.map((e) => e.event)), [dataset])
   const platforms = useMemo(() => [...new Set(dataset.users.map((u) => u.platform))].sort(), [dataset])
   const plans = useMemo(() => [...new Set(dataset.users.map((u) => u.plan))].sort(), [dataset])
 
@@ -126,26 +130,84 @@ export default function App() {
     [loadDataset],
   )
 
+  useEffect(() => {
+    if (!scanning) return
+    const t = setInterval(() => setScanElapsed(Math.round((Date.now() - scanStartedAt) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [scanning, scanStartedAt])
+
   const runScan = useCallback(async () => {
     if (!scanPath.trim() || scanning) return
     setScanning(true)
     setScanError(null)
+    setScanStatus('Starting scan…')
+    setScanStartedAt(Date.now())
+    setScanElapsed(0)
     try {
       const res = await fetch('/api/scan', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ path: scanPath.trim() }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error ?? `Scan failed (${res.status})`)
-      setPlan(data as EventPlan)
-      setScanOpen(false)
+      if (!res.body) throw new Error(`Scan failed (${res.status})`)
+      // NDJSON progress stream: status lines, then {done, plan} or {error}
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      let finished = false
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim()
+          buf = buf.slice(nl + 1)
+          if (!line) continue
+          const msg = JSON.parse(line)
+          if (msg.status) setScanStatus(msg.status)
+          if (msg.error) throw new Error(msg.error)
+          if (msg.done) {
+            setPlan(msg.plan as EventPlan)
+            setScanOpen(false)
+            finished = true
+          }
+        }
+      }
+      if (!finished) throw new Error('Scan stream ended unexpectedly — check the dev-server log')
     } catch (err) {
       setScanError(err instanceof Error ? err.message : String(err))
     } finally {
       setScanning(false)
+      setScanStatus('')
     }
   }, [scanPath, scanning])
+
+  // Apply accepted plan events to the grid: matched keys become the registry
+  // (labels, shapes, core flag), everything else folds into "Other".
+  const applyPlan = useCallback(
+    (accepted: { key: string; label: string }[], coreKey: string) => {
+      const names = new Set(dataset.events.map((e) => e.event))
+      const present = accepted.filter((e) => names.has(e.key))
+      if (present.length === 0) return
+      const ordered = [...present.filter((e) => e.key === coreKey), ...present.filter((e) => e.key !== coreKey)]
+      const shapes = ['circle', 'square', 'diamond', 'triangle'] as const
+      const registry: EventType[] = ordered.slice(0, 4).map((e, i) => ({
+        key: e.key,
+        label: e.label,
+        shape: shapes[i],
+        slot: i,
+        core: i === 0,
+      }))
+      const covered = new Set(registry.map((t) => t.key))
+      if ([...names].some((n) => !covered.has(n))) {
+        registry.push({ key: '__other__', label: 'Other', shape: 'dot' as const, slot: -1, core: false })
+      }
+      setDataset((prev) => ({ ...prev, registry, source: `${prev.source.replace(/ \+ event plan$/, '')} + event plan` }))
+      setEnabledEvents(new Set(registry.map((t) => t.key)))
+    },
+    [dataset],
+  )
 
   const onImportPlan = useCallback((file: File) => {
     file.text().then(
@@ -249,7 +311,7 @@ export default function App() {
               aria-label="Codebase path"
             />
             <button className="btn btn-primary" onClick={runScan} disabled={scanning || !scanPath.trim()}>
-              {scanning ? 'Scanning… (~1 min)' : 'Scan with Claude'}
+              {scanning ? 'Scanning…' : 'Scan with Claude'}
             </button>
             <button className="btn btn-ghost" onClick={() => planFileRef.current?.click()} disabled={scanning}>
               …or import dotchart.events.json
@@ -266,15 +328,30 @@ export default function App() {
               }}
             />
           </div>
-          <div className="scan-hint">
-            Reads the codebase server-side and asks Claude ({'Opus 4.8'}) to propose the user events worth tracking. Also
-            available as a CLI: <code>npm run scan -- /path/to/codebase</code>
-          </div>
+          {scanning ? (
+            <div className="scan-status" role="status">
+              <span className="scan-pulse" aria-hidden="true" />
+              {scanStatus} <span className="scan-elapsed">{scanElapsed}s</span>
+            </div>
+          ) : (
+            <div className="scan-hint">
+              Reads the codebase server-side and asks Claude ({'Opus 4.8'}) to propose the user events worth tracking.
+              Also available as a CLI: <code>npm run scan -- /path/to/codebase</code>
+            </div>
+          )}
           {scanError && <div className="scan-error">⚠ {scanError}</div>}
         </div>
       )}
 
-      {plan && <EventPlanPanel plan={plan} onClose={() => setPlan(null)} />}
+      {plan && (
+        <EventPlanPanel
+          key={`${plan.meta?.generated_at ?? ''}:${plan.events.map((e) => e.key).join(',')}`}
+          plan={plan}
+          datasetEvents={datasetEventNames}
+          onApply={applyPlan}
+          onClose={() => setPlan(null)}
+        />
+      )}
 
       <div className="filter-row">
         <select value={rangePreset} onChange={(e) => setRangePreset(e.target.value)} aria-label="Date range">

@@ -176,7 +176,8 @@ export async function scanCodebase(targetPath, { onStatus = () => {} } = {}) {
 
   onStatus(`Collecting files from ${root}…`)
   const { digest, included, skipped } = buildDigest(root)
-  onStatus(`Read ${included} files (${skipped} more skipped for size); asking ${MODEL}…`)
+  const kb = Math.round(digest.length / 1024)
+  onStatus(`Read ${included} files (~${kb} KB${skipped > 0 ? `, ${skipped} more skipped by size budget` : ''}) — sending to ${MODEL}…`)
 
   const client = new Anthropic({ apiKey })
   const stream = client.messages.stream({
@@ -192,6 +193,27 @@ export async function scanCodebase(targetPath, { onStatus = () => {} } = {}) {
       },
     ],
   })
+
+  // Live progress off the stream: announce when Claude starts reasoning, then
+  // count drafted events as the structured JSON streams out.
+  let outputText = ''
+  let draftedEvents = 0
+  let announcedThinking = false
+  stream.on('streamEvent', (event) => {
+    if (event.type === 'content_block_start' && event.content_block?.type === 'thinking' && !announcedThinking) {
+      announcedThinking = true
+      onStatus('Claude is reading the code and planning…')
+    }
+  })
+  stream.on('text', (delta) => {
+    outputText += delta
+    const n = (outputText.match(/"key"\s*:/g) || []).length
+    if (n > draftedEvents) {
+      draftedEvents = n
+      onStatus(`Writing the event plan — ${n} event${n === 1 ? '' : 's'} drafted…`)
+    }
+  })
+
   const message = await stream.finalMessage()
 
   if (message.stop_reason === 'refusal') throw new Error('Model declined the request')
