@@ -64,6 +64,15 @@ function scannerApi(): Plugin {
           res.end()
         }
 
+      // Does the dev server have its own API key? (UI shows key field if not)
+      server.middlewares.use(
+        '/api/keycheck',
+        json(async () => {
+          const { hasServerKey } = await import('./scanner/scan.mjs')
+          return { hasServerKey: hasServerKey() }
+        }),
+      )
+
       // Connect wizard: fast local discovery (no AI)
       server.middlewares.use(
         '/api/connect/discover',
@@ -79,10 +88,15 @@ function scannerApi(): Plugin {
       server.middlewares.use(
         '/api/connect/analyze',
         ndjson(async (body, onStatus) => {
-          const { path: targetPath, connectionString } = body as { path?: string; connectionString?: string }
+          const { path: targetPath, connectionString, model, apiKey } = body as {
+            path?: string
+            connectionString?: string
+            model?: string
+            apiKey?: string
+          }
           if (!targetPath) throw new Error('Body must be {"path": "...", "connectionString?": "..."}')
           const { analyzeProject } = await import('./scanner/connect.mjs')
-          return analyzeProject(targetPath, connectionString || undefined, { onStatus })
+          return analyzeProject(targetPath, connectionString || undefined, { onStatus, model, apiKey })
         }),
       )
 
@@ -90,12 +104,17 @@ function scannerApi(): Plugin {
       server.middlewares.use(
         '/api/instrument/prepare',
         ndjson(async (body, onStatus) => {
-          const { path: targetPath, events } = body as { path?: string; events?: unknown[] }
+          const { path: targetPath, events, model, apiKey } = body as {
+            path?: string
+            events?: unknown[]
+            model?: string
+            apiKey?: string
+          }
           if (!targetPath || !Array.isArray(events) || events.length === 0) {
             throw new Error('Body must be {"path": "...", "events": [...accepted plan events]}')
           }
           const { prepareInstrumentation } = await import('./scanner/instrument.mjs')
-          const prep = await prepareInstrumentation(targetPath, events, { onStatus })
+          const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey })
           onStatus(`Prepared ${prep.edits.length} edits (${prep.edits.filter((e: { status: string }) => e.status === 'ok').length} clean)`)
           return prep
         }),
@@ -167,7 +186,7 @@ function scannerApi(): Plugin {
           res.setHeader('cache-control', 'no-cache')
           const send = (obj: unknown) => res.write(JSON.stringify(obj) + '\n')
           try {
-            const { path: targetPath } = JSON.parse(body || '{}')
+            const { path: targetPath, model, apiKey } = JSON.parse(body || '{}')
             if (!targetPath || typeof targetPath !== 'string') {
               send({ error: 'Body must be {"path": "/path/to/codebase"}' })
               res.end()
@@ -175,6 +194,8 @@ function scannerApi(): Plugin {
             }
             const { scanCodebase } = await import('./scanner/scan.mjs')
             const plan = await scanCodebase(targetPath, {
+              model,
+              apiKey,
               onStatus: (s: string) => {
                 log(s)
                 send({ status: s })

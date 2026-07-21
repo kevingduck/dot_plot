@@ -10,7 +10,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Anthropic from '@anthropic-ai/sdk'
 
-const MODEL = 'claude-opus-4-8'
+export const DEFAULT_MODEL = 'claude-sonnet-5'
+export const ALLOWED_MODELS = ['claude-sonnet-5', 'claude-opus-4-8']
 const MAX_TOTAL_BYTES = 400_000 // ~100k tokens of code digest, well within 1M context
 const MAX_FILE_BYTES = 24_000
 
@@ -164,10 +165,16 @@ function loadEnvKey(projectRoot) {
   return null
 }
 
-export async function scanCodebase(targetPath, { onStatus = () => {} } = {}) {
+export function hasServerKey() {
   const projectRoot = path.dirname(fileURLToPath(import.meta.url)) + '/..'
-  const apiKey = loadEnvKey(path.resolve(projectRoot))
-  if (!apiKey) throw new Error('No ANTHROPIC_API_KEY found (env var or .env in project root)')
+  return loadEnvKey(path.resolve(projectRoot)) !== null
+}
+
+export async function scanCodebase(targetPath, { onStatus = () => {}, model, apiKey: userKey } = {}) {
+  const MODEL = ALLOWED_MODELS.includes(model) ? model : DEFAULT_MODEL
+  const projectRoot = path.dirname(fileURLToPath(import.meta.url)) + '/..'
+  const apiKey = userKey || loadEnvKey(path.resolve(projectRoot))
+  if (!apiKey) throw new Error('No API key — add yours in Settings, or put ANTHROPIC_API_KEY in the project .env')
 
   const root = path.resolve(targetPath)
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {

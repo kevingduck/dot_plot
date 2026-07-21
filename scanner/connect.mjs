@@ -11,10 +11,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Anthropic from '@anthropic-ai/sdk'
-import { buildDigest } from './scan.mjs'
+import { ALLOWED_MODELS, DEFAULT_MODEL, buildDigest } from './scan.mjs'
 import { scanDatabase } from './dbscan.mjs'
-
-const MODEL = 'claude-opus-4-8'
 
 function loadEnvKey() {
   if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY
@@ -146,9 +144,10 @@ Principles:
 - Always also provide instrumentation points (real files/functions from the code, with a one-line dotchart.track(userId, 'key', props) snippet) — even db-backed events benefit from live tracking later.
 - The instrumentation snippets must reference real code locations from the provided files.`
 
-export async function analyzeProject(targetPath, connectionString, { onStatus = () => {} } = {}) {
-  const apiKey = loadEnvKey()
-  if (!apiKey) throw new Error('No ANTHROPIC_API_KEY found (env var or .env in project root)')
+export async function analyzeProject(targetPath, connectionString, { onStatus = () => {}, model, apiKey: userKey } = {}) {
+  const MODEL = ALLOWED_MODELS.includes(model) ? model : DEFAULT_MODEL
+  const apiKey = userKey || loadEnvKey()
+  if (!apiKey) throw new Error('No API key — add yours in Settings, or put ANTHROPIC_API_KEY in the project .env')
   const root = path.resolve(targetPath)
 
   onStatus('Reading the codebase…')

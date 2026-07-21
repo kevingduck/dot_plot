@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { DiscoveredProject, EventPlan, RawEvent } from '../types'
 import { postJson, postNdjson } from '../lib/api'
+import { aiParams } from '../lib/settings'
 
 type Phase = 'path' | 'discovering' | 'discovered' | 'analyzing' | 'review' | 'importing'
 
@@ -50,7 +51,7 @@ export function ConnectWizard({ onData, onPlanOnly, onClose }: Props) {
     setError(null)
     try {
       const conn = useDb && project.databases[dbIndex] ? project.databases[dbIndex].connectionString : undefined
-      const result = await postNdjson<EventPlan>('/api/connect/analyze', { path: project.root, connectionString: conn }, setStatus)
+      const result = await postNdjson<EventPlan>('/api/connect/analyze', { path: project.root, connectionString: conn, ...aiParams() }, setStatus)
       setPlan(result)
       setAccepted(new Set(result.events.filter((e) => e.tier !== 'noise').map((e) => e.key)))
       setPhase('review')

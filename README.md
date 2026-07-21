@@ -35,8 +35,12 @@ The differentiating piece: point DotChart at a repo and Claude proposes the
 analytics events worth tracking — a ranked plan of value/activation/feature
 events with concrete instrumentation points, reviewed and edited in the UI.
 
+AI analysis runs on **Claude Sonnet 5** by default (near-Opus quality on code
+analysis at ~40% of the cost); switch to Opus 4.8 for gnarly codebases — or add
+your own API key — under **⚙ Settings**. Each plan shows its actual cost.
+
 ```sh
-# 1. Put your Anthropic API key in .env (gitignored):
+# 1. Provide an Anthropic API key — either in ⚙ Settings in the UI, or:
 echo 'ANTHROPIC_API_KEY=sk-ant-…' > .env
 
 # 2a. From the UI: "Scan codebase" button → enter a path → review the plan
@@ -44,7 +48,7 @@ echo 'ANTHROPIC_API_KEY=sk-ant-…' > .env
 npm run scan -- /path/to/your/codebase   # writes dotchart.events.json
 ```
 
-The scanner (`scanner/scan.mjs`, model `claude-opus-4-8`) walks the repo
+The scanner (`scanner/scan.mjs`) walks the repo
 (routes/handlers/components first, ~400KB budget), asks Claude for a structured
 event plan, and returns: a product summary, one **core value event**, and 4–10
 events tiered core/activation/feature/noise — each with rationale, confidence,

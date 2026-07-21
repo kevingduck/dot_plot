@@ -4,6 +4,7 @@ import { COLORS, seriesColor, type Mode } from './theme'
 import { generateSample } from './data/generate'
 import { datasetFromEvents, parseCsv, toCsv } from './data/csv'
 import { postNdjson } from './lib/api'
+import { aiParams } from './lib/settings'
 import { buildModel, computeStats } from './lib/model'
 import { buildCohorts } from './lib/retention'
 import { DotPlot } from './components/DotPlot'
@@ -13,6 +14,7 @@ import { UserDrawer } from './components/UserDrawer'
 import { EventPlanPanel } from './components/EventPlanPanel'
 import { DbPanel } from './components/DbPanel'
 import { ConnectWizard } from './components/ConnectWizard'
+import { SettingsPanel } from './components/SettingsPanel'
 import { ShapeIcon } from './components/ShapeIcon'
 
 type ThemePref = 'auto' | 'light' | 'dark'
@@ -81,6 +83,7 @@ export default function App() {
   const [dataset, setDataset] = useState<Dataset>(() => persisted?.dataset ?? generateSample(1))
   const [importError, setImportError] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(() => persisted === null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const [rangePreset, setRangePreset] = useState('60')
   const [customFrom, setCustomFrom] = useState('')
@@ -202,7 +205,7 @@ export default function App() {
     setScanStartedAt(Date.now())
     setScanElapsed(0)
     try {
-      const result = await postNdjson<EventPlan>('/api/scan', { path: scanPath.trim() }, setScanStatus)
+      const result = await postNdjson<EventPlan>('/api/scan', { path: scanPath.trim(), ...aiParams() }, setScanStatus)
       setPlan(result)
       setScanOpen(false)
     } catch (err) {
@@ -298,6 +301,9 @@ export default function App() {
           <button className="btn" onClick={onExport}>
             Export CSV
           </button>
+          <button className="btn" onClick={() => setSettingsOpen(!settingsOpen)} title="Model & API key" aria-expanded={settingsOpen}>
+            ⚙ Settings
+          </button>
           <button
             className="btn"
             onClick={() => setThemePref(themePref === 'auto' ? 'dark' : themePref === 'dark' ? 'light' : 'auto')}
@@ -318,6 +324,8 @@ export default function App() {
           />
         </div>
       </header>
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
 
       {wizardOpen && (
         <ConnectWizard
@@ -377,7 +385,7 @@ export default function App() {
             </div>
           ) : (
             <div className="scan-hint">
-              Reads the codebase server-side and asks Claude ({'Opus 4.8'}) to propose the user events worth tracking.
+              Reads the codebase server-side and asks Claude to propose the user events worth tracking (model in ⚙ Settings).
               Also available as a CLI: <code>npm run scan -- /path/to/codebase</code>
             </div>
           )}

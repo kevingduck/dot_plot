@@ -15,8 +15,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import Anthropic from '@anthropic-ai/sdk'
-
-const MODEL = 'claude-opus-4-8'
+import { ALLOWED_MODELS, DEFAULT_MODEL } from './scan.mjs'
 
 function git(repo, args, opts = {}) {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', ...opts }).trim()
@@ -133,9 +132,10 @@ Hard rules:
  * Stage 1 — propose edits. Read-only: returns {sdk_file, edits[], notes};
  * each edit pre-validated with status 'ok' | 'no_match' | 'ambiguous'.
  */
-export async function prepareInstrumentation(targetPath, events, { onStatus = () => {} } = {}) {
-  const apiKey = loadEnvKey()
-  if (!apiKey) throw new Error('No ANTHROPIC_API_KEY found (env var or .env in project root)')
+export async function prepareInstrumentation(targetPath, events, { onStatus = () => {}, model, apiKey: userKey } = {}) {
+  const MODEL = ALLOWED_MODELS.includes(model) ? model : DEFAULT_MODEL
+  const apiKey = userKey || loadEnvKey()
+  if (!apiKey) throw new Error('No API key — add yours in Settings, or put ANTHROPIC_API_KEY in the project .env')
   const root = path.resolve(targetPath)
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`Not a directory: ${root}`)
 

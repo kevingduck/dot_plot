@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { InstrumentPrep, InstrumentResult, PlannedEvent, PreparedEdit } from '../types'
 import { postJson, postNdjson } from '../lib/api'
+import { aiParams } from '../lib/settings'
 
 type Phase = 'idle' | 'preparing' | 'review' | 'applying' | 'done'
 
@@ -49,7 +50,7 @@ export function InstrumentPanel({ defaultPath, events }: Props) {
     setPhase('preparing')
     setError(null)
     try {
-      const p = await postNdjson<InstrumentPrep>('/api/instrument/prepare', { path: path.trim(), events }, setStatus)
+      const p = await postNdjson<InstrumentPrep>('/api/instrument/prepare', { path: path.trim(), events, ...aiParams() }, setStatus)
       setPrep(p)
       setSelected(new Set(p.edits.filter((e) => e.status === 'ok').map((e) => e.id)))
       setIncludeSdk(true)

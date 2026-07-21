@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { EventPlan, EventTier } from '../types'
 import { InstrumentPanel } from './InstrumentPanel'
+import { estimateCost } from '../lib/settings'
 
 const TIER_ORDER: EventTier[] = ['core', 'activation', 'feature', 'noise']
 const TIER_LABEL: Record<EventTier, string> = {
@@ -105,7 +106,7 @@ export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props)
           <h2>Proposed event plan</h2>
           <p className="card-sub">
             {plan.meta
-              ? `Scanned ${plan.meta.scanned_path} (${plan.meta.files_included} files, ${plan.meta.model})`
+              ? `Scanned ${plan.meta.scanned_path} (${plan.meta.files_included} files, ${plan.meta.model}${estimateCost(plan.meta.model, plan.meta.usage) ? `, ~${estimateCost(plan.meta.model, plan.meta.usage)}` : ''})`
               : 'Imported plan'}{' '}
             · {accepted.size} of {plan.events.length} events accepted
           </p>
