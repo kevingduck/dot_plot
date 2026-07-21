@@ -7,6 +7,7 @@ export interface LocalDigest {
   digest: string
   included: number
   skipped: number
+  trackedKeys: string[]
   databases: { envFile: string; varName: string; connectionString: string; redacted: string }[]
 }
 
@@ -80,15 +81,23 @@ function entriesFromFileList(files: FileList): { name: string; entries: Entry[];
   return { name, entries, envs }
 }
 
+const TRACK_RE = /\btrack\s*\(\s*[^,()\n]{0,80},\s*['"]([A-Za-z][A-Za-z0-9_]{1,63})['"]/g
+
 async function buildDigest(name: string, entries: Entry[], envs: Entry[]): Promise<LocalDigest> {
   entries.sort((a, b) => priorityOf(a.rel) - priorityOf(b.rel) || a.file.size - b.file.size)
   const parts: string[] = []
+  const trackedKeys = new Set<string>()
   let total = 0
   let included = 0
   for (const e of entries) {
     if (total > MAX_TOTAL) break
     let text = await e.file.text()
     if (text.includes('\u0000')) continue
+    // find existing track() keys in the FULL text before any truncation
+    for (const m of text.matchAll(TRACK_RE)) trackedKeys.add(m[1])
+    if (e.rel.endsWith('.html')) {
+      text = text.replace(/<style[\s\S]*?<\/style>/gi, '<style>/* styles omitted */</style>')
+    }
     if (text.length > MAX_FILE) text = text.slice(0, MAX_FILE) + `\n… [truncated, ${text.length} chars total]`
     parts.push(`===== FILE: ${e.rel} =====\n${text}`)
     total += text.length
@@ -108,7 +117,7 @@ async function buildDigest(name: string, entries: Entry[], envs: Entry[]): Promi
       }
     }
   }
-  return { name, digest: parts.join('\n\n'), included, skipped: entries.length - included, databases }
+  return { name, digest: parts.join('\n\n'), included, skipped: entries.length - included, trackedKeys: [...trackedKeys], databases }
 }
 
 /** Native directory picker (Chrome/Edge). Returns null if unsupported or cancelled. */

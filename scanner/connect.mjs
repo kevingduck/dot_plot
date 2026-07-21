@@ -13,7 +13,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import Anthropic from '@anthropic-ai/sdk'
-import { ALLOWED_MODELS, DEFAULT_MODEL, buildDigest } from './scan.mjs'
+import { ALLOWED_MODELS, DEFAULT_MODEL, buildDigest, extractTrackedKeys, reconcilePlanWithExistingKeys } from './scan.mjs'
 import { scanDatabase } from './dbscan.mjs'
 
 function loadEnvKey() {
@@ -244,16 +244,17 @@ export async function analyzeProject(targetPath, connectionString, { onStatus = 
   if (!apiKey) throw new Error('No API key — add yours in Settings, or put ANTHROPIC_API_KEY in the project .env')
   const root = prebuilt ? `local:${prebuilt.name}` : path.resolve(targetPath)
 
-  let digest, included, skipped
+  let digest, included, skipped, trackedKeys
   if (prebuilt) {
     // Digest built in the user's browser (hosted mode) — cap defensively
     digest = String(prebuilt.digest).slice(0, 600_000)
     included = Number(prebuilt.included) || 0
     skipped = Number(prebuilt.skipped) || 0
+    trackedKeys = Array.isArray(prebuilt.trackedKeys) ? prebuilt.trackedKeys.filter((k) => typeof k === 'string').slice(0, 100) : undefined
     onStatus(`Received ${included} source files (~${Math.round(digest.length / 1024)} KB) from your browser`)
   } else {
     onStatus('Reading the codebase…')
-    ;({ digest, included, skipped } = buildDigest(root))
+    ;({ digest, included, skipped, trackedKeys } = buildDigest(root))
     onStatus(`Read ${included} source files (~${Math.round(digest.length / 1024)} KB${skipped ? `, ${skipped} skipped by size budget` : ''})`)
   }
 
@@ -275,6 +276,13 @@ export async function analyzeProject(targetPath, connectionString, { onStatus = 
         .join('\n')}`
     : ''
 
+  // Existing instrumentation is the source of truth for event names
+  const existingKeys = trackedKeys ?? extractTrackedKeys(digest)
+  const existingNote = existingKeys.length
+    ? `\n\nIMPORTANT — this codebase ALREADY contains DotChart tracking calls with these exact event keys: ${existingKeys.join(', ')}. When proposing those events, adopt these keys VERBATIM (never rename, pluralize, or invent variants — live data already uses these names). Invent new keys only for actions that are not yet instrumented.`
+    : ''
+  if (existingKeys.length) onStatus(`Found ${existingKeys.length} existing tracking calls — keeping their exact event keys`)
+
   onStatus(`Asking ${MODEL} to analyze the product…`)
   const client = new Anthropic({ apiKey })
   const stream = client.messages.stream({
@@ -283,7 +291,7 @@ export async function analyzeProject(targetPath, connectionString, { onStatus = 
     thinking: { type: 'adaptive' },
     system: CONNECT_SYSTEM,
     output_config: { format: { type: 'json_schema', schema: CONNECT_SCHEMA } },
-    messages: [{ role: 'user', content: `Analyze this product and propose its analytics event plan.${schemaBlock}\n\nCODEBASE:\n\n${digest}` }],
+    messages: [{ role: 'user', content: `Analyze this product and propose its analytics event plan.${existingNote}${schemaBlock}\n\nCODEBASE:\n\n${digest}` }],
   })
   let drafted = 0
   stream.on('text', (_, snapshot) => {
@@ -307,6 +315,9 @@ export async function analyzeProject(targetPath, connectionString, { onStatus = 
       m && m.table && known.has(m.table) && known.get(m.table).has(m.user_column) && known.get(m.table).has(m.timestamp_column)
     if (!valid) e.db_mapping = { table: '', user_column: '', timestamp_column: '' }
   }
+  const { renamed, added } = reconcilePlanWithExistingKeys(plan, existingKeys, { withDbMapping: true })
+  if (renamed.length) onStatus(`Aligned ${renamed.length} event key${renamed.length === 1 ? '' : 's'} with existing instrumentation (${renamed.join('; ')})`)
+  if (added.length) onStatus(`Added ${added.length} already-instrumented event${added.length === 1 ? '' : 's'} the analysis missed (${added.join(', ')})`)
   const dbBacked = plan.events.filter((e) => e.db_mapping.table).length
   onStatus(`Proposal ready: ${plan.events.length} events, ${dbBacked} already in your database`)
 

@@ -67,10 +67,71 @@ export function collectFiles(root) {
   return files
 }
 
+/** Event keys already instrumented in the code: second string arg of track() calls. */
+export function extractTrackedKeys(digest) {
+  const keys = new Set()
+  const re = /\btrack\s*\(\s*[^,()\n]{0,80},\s*['"]([A-Za-z][A-Za-z0-9_]{1,63})['"]/g
+  let m
+  while ((m = re.exec(digest))) keys.add(m[1])
+  return [...keys]
+}
+
+/**
+ * Make the plan speak the language the code actually sends: rename plan
+ * events whose keys near-miss an existing instrumented key, and append any
+ * instrumented keys the model didn't propose at all.
+ */
+export function reconcilePlanWithExistingKeys(plan, existingKeys, { withDbMapping = false } = {}) {
+  if (!existingKeys.length) return { renamed: [], added: [] }
+  const tokens = (x) => new Set(x.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean))
+  const planKeys = new Set(plan.events.map((e) => e.key))
+  const unclaimed = existingKeys.filter((k) => !planKeys.has(k))
+  const renamed = []
+  for (const ev of plan.events) {
+    if (existingKeys.includes(ev.key)) continue
+    const et = tokens(ev.key)
+    let best = null
+    let bestScore = 0
+    for (const k of unclaimed) {
+      const overlap = [...tokens(k)].filter((t) => et.has(t)).length
+      const contain = ev.key.includes(k) || k.includes(ev.key) ? 2 : 0
+      const score = overlap + contain
+      if (score > bestScore) {
+        best = k
+        bestScore = score
+      }
+    }
+    if (best && bestScore >= 2) {
+      renamed.push(`${ev.key} → ${best}`)
+      if (plan.core_event === ev.key) plan.core_event = best
+      ev.key = best
+      unclaimed.splice(unclaimed.indexOf(best), 1)
+    }
+  }
+  const added = []
+  for (const k of unclaimed) {
+    const label = k.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase())
+    const ev = {
+      key: k,
+      label,
+      description: 'Already instrumented — an existing track() call in the code sends this event.',
+      tier: 'feature',
+      confidence: 'high',
+      rationale: 'Detected from existing instrumentation; kept with its exact key so live events match the plan.',
+      instrumentation: [],
+    }
+    if (withDbMapping) ev.db_mapping = { table: '', user_column: '', timestamp_column: '' }
+    plan.events.push(ev)
+    added.push(k)
+  }
+  return { renamed, added }
+}
+
 export function buildDigest(root) {
   const files = collectFiles(root)
   if (files.length === 0) throw new Error(`No source files found under ${root}`)
   const parts = []
+  const trackedKeys = new Set()
   let total = 0
   let included = 0
   for (const f of files) {
@@ -82,6 +143,13 @@ export function buildDigest(root) {
       continue
     }
     if (text.includes('\u0000')) continue // binary
+    // Existing instrumentation must be found in the FULL text — truncation
+    // below could hide track() calls deep in large files
+    for (const k of extractTrackedKeys(text)) trackedKeys.add(k)
+    // HTML: strip style blocks so the budget goes to logic, not CSS
+    if (f.rel.endsWith('.html')) {
+      text = text.replace(/<style[\s\S]*?<\/style>/gi, '<style>/* styles omitted */</style>')
+    }
     if (text.length > MAX_FILE_BYTES) {
       text = text.slice(0, MAX_FILE_BYTES) + `\n… [truncated, ${text.length} chars total]`
     }
@@ -90,7 +158,7 @@ export function buildDigest(root) {
     included++
   }
   const skipped = files.length - included
-  return { digest: parts.join('\n\n'), included, skipped, totalFiles: files.length }
+  return { digest: parts.join('\n\n'), included, skipped, totalFiles: files.length, trackedKeys: [...trackedKeys] }
 }
 
 const PLAN_SCHEMA = {
@@ -182,9 +250,15 @@ export async function scanCodebase(targetPath, { onStatus = () => {}, model, api
   }
 
   onStatus(`Collecting files from ${root}…`)
-  const { digest, included, skipped } = buildDigest(root)
+  const { digest, included, skipped, trackedKeys } = buildDigest(root)
   const kb = Math.round(digest.length / 1024)
   onStatus(`Read ${included} files (~${kb} KB${skipped > 0 ? `, ${skipped} more skipped by size budget` : ''}) — sending to ${MODEL}…`)
+
+  const existingKeys = trackedKeys ?? extractTrackedKeys(digest)
+  const existingNote = existingKeys.length
+    ? `\n\nIMPORTANT — this codebase ALREADY contains DotChart tracking calls with these exact event keys: ${existingKeys.join(', ')}. When proposing those events, adopt these keys VERBATIM (never rename, pluralize, or invent variants — live data already uses these names). Invent new keys only for actions that are not yet instrumented.`
+    : ''
+  if (existingKeys.length) onStatus(`Found ${existingKeys.length} existing tracking calls — keeping their exact event keys`)
 
   const client = new Anthropic({ apiKey })
   const stream = client.messages.stream({
@@ -196,7 +270,7 @@ export async function scanCodebase(targetPath, { onStatus = () => {}, model, api
     messages: [
       {
         role: 'user',
-        content: `Analyze this codebase and propose the analytics event plan.\n\n${digest}`,
+        content: `Analyze this codebase and propose the analytics event plan.${existingNote}\n\n${digest}`,
       },
     ],
   })
@@ -227,6 +301,9 @@ export async function scanCodebase(targetPath, { onStatus = () => {}, model, api
   if (message.stop_reason === 'max_tokens') throw new Error('Response truncated (max_tokens) — try a smaller codebase')
   const text = message.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
   const plan = JSON.parse(text)
+  const { renamed, added } = reconcilePlanWithExistingKeys(plan, existingKeys)
+  if (renamed.length) onStatus(`Aligned ${renamed.length} event key${renamed.length === 1 ? '' : 's'} with existing instrumentation (${renamed.join('; ')})`)
+  if (added.length) onStatus(`Added ${added.length} already-instrumented event${added.length === 1 ? '' : 's'} (${added.join(', ')})`)
   return {
     ...plan,
     meta: {

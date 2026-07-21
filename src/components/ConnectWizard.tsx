@@ -189,7 +189,7 @@ export function ConnectWizard({ hosted, onData, onPlanOnly, onDbImport, onImport
         '/api/connect/analyze',
         localDigest
           ? {
-              digest: { name: localDigest.name, digest: localDigest.digest, included: localDigest.included, skipped: localDigest.skipped },
+              digest: { name: localDigest.name, digest: localDigest.digest, included: localDigest.included, skipped: localDigest.skipped, trackedKeys: localDigest.trackedKeys },
               connectionString: conn,
               ...aiParams(),
             }
