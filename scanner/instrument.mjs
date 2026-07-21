@@ -48,7 +48,18 @@ ${decl} {
       (typeof process !== 'undefined' && process.env && process.env.DOTCHART_INGEST_URL) ||
       (typeof window !== 'undefined' && (window${isTs ? ' as unknown as { DOTCHART_INGEST_URL?: string }' : ''}).DOTCHART_INGEST_URL) ||
       ''
-    if (!url || !userId || !event) return
+    if (!url || !event) return
+    // No real user id (app without accounts)? Use a stable per-browser id so
+    // each visitor gets their own row instead of one shared "anonymous".
+    if ((!userId || userId === 'anonymous') && typeof localStorage !== 'undefined') {
+      let uid = localStorage.getItem('dotchart_uid')
+      if (!uid) {
+        uid = 'anon_' + Math.random().toString(36).slice(2, 10)
+        localStorage.setItem('dotchart_uid', uid)
+      }
+      userId = uid
+    }
+    if (!userId) return
     const payload${types} = {
       user_id: String(userId),
       event: event,

@@ -118,7 +118,8 @@ export function datasetFromEvents(events: RawEvent[], source: string): Dataset {
   const users = new Map<string, User>()
   for (const e of events) {
     if (!users.has(e.userId)) {
-      users.set(e.userId, { id: e.userId, name: e.userId, platform: '—', plan: '—', country: '—' })
+      const name = e.userId.startsWith('anon_') ? `Visitor ${e.userId.slice(5, 11)}` : e.userId
+      users.set(e.userId, { id: e.userId, name, platform: '—', plan: '—', country: '—' })
     }
   }
   if (events.length === 0) throw new Error('No events returned')

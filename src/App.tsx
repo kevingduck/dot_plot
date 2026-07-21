@@ -101,6 +101,8 @@ export default function App() {
   const [persisted] = useState<Persisted | null>(loadPersisted)
   const [seed, setSeed] = useState(1)
   const [dataset, setDataset] = useState<Dataset>(() => persisted?.dataset ?? generateSample(1))
+  const datasetRef = useRef<Dataset>(dataset)
+  datasetRef.current = dataset
   const [importError, setImportError] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(() => persisted === null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -168,10 +170,11 @@ export default function App() {
   useEffect(() => {
     if (!projectKey) return
     const t = setTimeout(() => {
+      const demo = dataset.source.startsWith('Sample data')
       postJson('/api/projects/save', {
         path: projectKey,
         name: projectKey.split('/').pop(),
-        dataset,
+        dataset: demo ? null : dataset,
         plan,
         dbSync,
         insights: insightsSaved,
@@ -194,9 +197,28 @@ export default function App() {
     }
   }, [dataset, plan, dbSync, insightsSaved])
 
-  // Merge events received via /ingest into the current dataset (deduped)
+  const loadDataset = useCallback((ds: Dataset) => {
+    mergedCountRef.current = 0 // live events re-merge into the new dataset
+    setDataset(ds)
+    setEnabledEvents(new Set(ds.registry.map((t) => t.key)))
+    setSelectedUserId(null)
+    setPlatform('all')
+    setPlanFilter('all')
+    setSearch('')
+    setImportError(null)
+  }, [])
+
+  // Merge events received via /ingest into the current dataset (deduped).
+  // If the grid is showing demo data, real events REPLACE it — fictional and
+  // real users must never mix.
   const mergeLiveEvents = useCallback((incoming: { userId: string; event: string; ts: number }[]) => {
     if (incoming.length === 0) return
+    if (datasetRef.current.source.startsWith('Sample data')) {
+      const ds = datasetFromEvents(incoming, 'Live tracked events')
+      const registry = plan ? registryFromPlan(new Set(ds.events.map((e) => e.event)), plan.events, plan.core_event) : null
+      loadDataset(registry ? { ...ds, registry } : ds)
+      return
+    }
     setDataset((prev) => {
       const seen = new Set(prev.events.map((e) => `${e.userId}|${e.event}|${e.ts}`))
       const fresh = incoming.filter((e) => !seen.has(`${e.userId}|${e.event}|${e.ts}`))
@@ -215,7 +237,7 @@ export default function App() {
       return { ...prev, users: [...users.values()], events, registry, source }
     })
     setEnabledEvents((prev) => (prev.has('__other__') ? prev : new Set([...prev, '__other__'])))
-  }, [])
+  }, [plan, loadDataset])
 
   // Poll the store so tracked events appear on the grid without a reload
   useEffect(() => {
@@ -272,23 +294,26 @@ export default function App() {
     document.documentElement.dataset.theme = themePref === 'auto' ? '' : themePref
   }, [themePref])
 
-  const loadDataset = useCallback((ds: Dataset) => {
-    mergedCountRef.current = 0 // live events re-merge into the new dataset
-    setDataset(ds)
-    setEnabledEvents(new Set(ds.registry.map((t) => t.key)))
-    setSelectedUserId(null)
-    setPlatform('all')
-    setPlanFilter('all')
-    setSearch('')
-    setImportError(null)
-  }, [])
 
   const loadWorkspace = useCallback(
     async (slug: string) => {
       setProjectsMenuOpen(false)
       try {
         const ws = await postJson<Persisted & { path: string }>('/api/projects/load', { slug })
-        loadDataset(ws.dataset)
+        if (ws.dataset) {
+          loadDataset(ws.dataset)
+        } else {
+          // Workspace saved before real data existed — chart the live store
+          const store = await postJson<{ events: { userId: string; event: string; ts: number }[] }>('/api/store/events', {})
+          if (store.events.length > 0 && ws.plan) {
+            const ds = datasetFromEvents(store.events, 'Live tracked events')
+            const registry = registryFromPlan(new Set(ds.events.map((e) => e.event)), ws.plan.events, ws.plan.core_event)
+            loadDataset(registry ? { ...ds, registry } : ds)
+            mergedCountRef.current = store.events.length
+          } else {
+            loadDataset(generateSample(seed))
+          }
+        }
         setPlan(ws.plan ?? null)
         setPlanOpen(ws.plan != null)
         setDbSync(ws.dbSync ?? null)
