@@ -30,7 +30,7 @@ function useMode(pref: ThemePref): Mode {
   return pref === 'auto' ? (osDark ? 'dark' : 'light') : pref
 }
 
-const STORE_KEY = 'dotchart:v1'
+const STORE_KEY = 'dotchart:v2' // v1 abandoned: could hold pre-reset datasets that would re-pollute workspaces via autosave
 
 interface Persisted {
   dataset: Dataset
