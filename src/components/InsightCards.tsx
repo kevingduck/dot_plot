@@ -11,21 +11,23 @@ const KIND_LABEL: Record<Insight['kind'], string> = {
   milestone: '⭐ Worth a look',
 }
 
-interface Props {
-  model: GridModel
-  dataset: Dataset
-  onHighlight: (users: Set<string> | null) => void
-}
-
-interface InsightsResponse {
+export interface InsightsResponse {
   insights: Insight[]
   meta: { model: string; usage: { input_tokens: number; output_tokens: number } }
 }
 
-export function InsightCards({ model, dataset, onHighlight }: Props) {
+interface Props {
+  model: GridModel
+  dataset: Dataset
+  saved: InsightsResponse | null
+  onSaved: (r: InsightsResponse) => void
+  onHighlight: (users: Set<string> | null) => void
+}
+
+export function InsightCards({ model, dataset, saved, onSaved, onHighlight }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<InsightsResponse | null>(null)
+  const [result, setResult] = useState<InsightsResponse | null>(saved)
   const [active, setActive] = useState<number | null>(null)
 
   const run = async () => {
@@ -35,7 +37,9 @@ export function InsightCards({ model, dataset, onHighlight }: Props) {
     onHighlight(null)
     try {
       const summary = buildUsageSummary(model, dataset)
-      setResult(await postJson<InsightsResponse>('/api/insights', { summary, ...aiParams() }))
+      const r = await postJson<InsightsResponse>('/api/insights', { summary, ...aiParams() })
+      setResult(r)
+      onSaved(r)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {

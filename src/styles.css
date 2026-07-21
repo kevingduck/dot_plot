@@ -412,6 +412,33 @@ body {
 .menu button:hover {
   background: var(--wash);
 }
+.menu-row {
+  display: flex;
+  align-items: center;
+}
+.menu-row > button:first-child {
+  flex: 1;
+}
+.menu-sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.menu-delete {
+  font: inherit;
+  font-size: 12px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+.menu-delete:hover {
+  background: var(--wash);
+  color: var(--text-primary);
+}
 
 /* ---- folder picker ---- */
 .picker {

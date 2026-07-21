@@ -125,6 +125,37 @@ function scannerApi(): Plugin {
         }),
       )
 
+      // Project workspaces: save/load everything learned about a project
+      server.middlewares.use(
+        '/api/projects/save',
+        json(async (body) => {
+          const { saveWorkspace } = await import('./scanner/projects.mjs')
+          return saveWorkspace(body)
+        }),
+      )
+      server.middlewares.use(
+        '/api/projects/list',
+        json(async () => {
+          const { listWorkspaces } = await import('./scanner/projects.mjs')
+          return { projects: listWorkspaces() }
+        }),
+      )
+      server.middlewares.use(
+        '/api/projects/load',
+        json(async (body) => {
+          const { loadWorkspace } = await import('./scanner/projects.mjs')
+          return loadWorkspace(String((body as { slug?: string }).slug ?? ''))
+        }),
+      )
+      server.middlewares.use(
+        '/api/projects/delete',
+        json(async (body) => {
+          const { deleteWorkspace } = await import('./scanner/projects.mjs')
+          deleteWorkspace(String((body as { slug?: string }).slug ?? ''))
+          return { ok: true }
+        }),
+      )
+
       // Insights: Claude reads the usage summary and flags actionable patterns
       server.middlewares.use(
         '/api/insights',

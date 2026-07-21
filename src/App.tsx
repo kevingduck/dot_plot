@@ -12,7 +12,7 @@ import { StatTiles } from './components/StatTiles'
 import { UserDrawer } from './components/UserDrawer'
 import { EventPlanPanel } from './components/EventPlanPanel'
 import { ConnectWizard } from './components/ConnectWizard'
-import { InsightCards } from './components/InsightCards'
+import { InsightCards, type InsightsResponse } from './components/InsightCards'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ShapeIcon } from './components/ShapeIcon'
 
@@ -35,6 +35,17 @@ interface Persisted {
   dataset: Dataset
   plan: EventPlan | null
   dbSync?: DbSyncConfig | null
+  insights?: InsightsResponse | null
+}
+
+interface WorkspaceSummary {
+  slug: string
+  name: string
+  path: string
+  savedAt: number
+  users: number
+  events: number
+  hasInsights: boolean
 }
 
 function loadPersisted(): Persisted | null {
@@ -112,6 +123,36 @@ export default function App() {
   const [highlightUsers, setHighlightUsers] = useState<Set<string> | null>(null)
   const mergedCountRef = useRef(0)
 
+  // Per-project workspaces (saved server-side under ~/.dotchart/projects)
+  const [insightsSaved, setInsightsSaved] = useState<InsightsResponse | null>(persisted?.insights ?? null)
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
+  const [projectsMenuOpen, setProjectsMenuOpen] = useState(false)
+  const projectKey = plan?.meta?.scanned_path ?? null
+
+  const refreshWorkspaces = useCallback(() => {
+    postJson<{ projects: WorkspaceSummary[] }>('/api/projects/list', {}).then(
+      (r) => setWorkspaces(r.projects),
+      () => {},
+    )
+  }, [])
+  useEffect(refreshWorkspaces, [refreshWorkspaces])
+
+  // Autosave the active project's workspace (debounced) whenever it changes
+  useEffect(() => {
+    if (!projectKey) return
+    const t = setTimeout(() => {
+      postJson('/api/projects/save', {
+        path: projectKey,
+        name: projectKey.split('/').pop(),
+        dataset,
+        plan,
+        dbSync,
+        insights: insightsSaved,
+      }).then(refreshWorkspaces, () => {})
+    }, 1200)
+    return () => clearTimeout(t)
+  }, [projectKey, dataset, plan, dbSync, insightsSaved, refreshWorkspaces])
+
   // Persist real data (not the regenerable sample) across reloads
   useEffect(() => {
     try {
@@ -119,12 +160,12 @@ export default function App() {
         localStorage.removeItem(STORE_KEY)
         return
       }
-      const raw = JSON.stringify({ dataset, plan, dbSync })
+      const raw = JSON.stringify({ dataset, plan, dbSync, insights: insightsSaved })
       if (raw.length < 4_500_000) localStorage.setItem(STORE_KEY, raw)
     } catch {
       /* quota exceeded — skip persistence */
     }
-  }, [dataset, plan, dbSync])
+  }, [dataset, plan, dbSync, insightsSaved])
 
   // Merge events received via /ingest into the current dataset (deduped)
   const mergeLiveEvents = useCallback((incoming: { userId: string; event: string; ts: number }[]) => {
@@ -213,6 +254,25 @@ export default function App() {
     setSearch('')
     setImportError(null)
   }, [])
+
+  const loadWorkspace = useCallback(
+    async (slug: string) => {
+      setProjectsMenuOpen(false)
+      try {
+        const ws = await postJson<Persisted & { path: string }>('/api/projects/load', { slug })
+        loadDataset(ws.dataset)
+        setPlan(ws.plan ?? null)
+        setPlanOpen(false)
+        setDbSync(ws.dbSync ?? null)
+        setInsightsSaved(ws.insights ?? null)
+        setHighlightUsers(null)
+      } catch (err) {
+        setImportError(err instanceof Error ? err.message : String(err))
+      }
+    },
+    [loadDataset],
+  )
+
 
   // Cell display priority: the rarest event of the day wins the cell, so
   // low-frequency, high-signal moments (created a playlist) stay visible on
@@ -350,6 +410,44 @@ export default function App() {
             <button className="btn" onClick={() => setPlanOpen(!planOpen)} aria-expanded={planOpen}>
               {planOpen ? 'Hide event plan' : 'Event plan'}
             </button>
+          )}
+          {workspaces.length > 0 && (
+            <div className="menu-wrap">
+              <button
+                className="btn"
+                onClick={() => setProjectsMenuOpen(!projectsMenuOpen)}
+                aria-expanded={projectsMenuOpen}
+                aria-haspopup="menu"
+              >
+                Projects ▾
+              </button>
+              {projectsMenuOpen && (
+                <div className="menu" role="menu">
+                  {workspaces.map((w) => (
+                    <div className="menu-row" key={w.slug}>
+                      <button role="menuitem" onClick={() => loadWorkspace(w.slug)} title={w.path}>
+                        {projectKey === w.path ? '● ' : ''}
+                        {w.name}
+                        <span className="menu-sub">
+                          {w.users} users · {w.events.toLocaleString()} events{w.hasInsights ? ' · insights' : ''}
+                        </span>
+                      </button>
+                      <button
+                        className="menu-delete"
+                        aria-label={`Forget ${w.name}`}
+                        title="Forget this saved project"
+                        onClick={async () => {
+                          await postJson('/api/projects/delete', { slug: w.slug })
+                          refreshWorkspaces()
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
           <div className="menu-wrap">
             <button className="btn" onClick={() => setDataMenuOpen(!dataMenuOpen)} aria-expanded={dataMenuOpen} aria-haspopup="menu">
@@ -530,7 +628,14 @@ export default function App() {
 
       <StatTiles stats={stats} coreLabel={coreType?.label ?? 'All'} />
 
-      <InsightCards model={model} dataset={dataset} onHighlight={setHighlightUsers} />
+      <InsightCards
+        key={projectKey ?? 'adhoc'}
+        model={model}
+        dataset={dataset}
+        saved={insightsSaved}
+        onSaved={setInsightsSaved}
+        onHighlight={setHighlightUsers}
+      />
 
       <section className="card card-grid">
         <div className="card-head">
