@@ -73,6 +73,71 @@ function scannerApi(): Plugin {
         }),
       )
 
+      // Ingest: receives track() events from instrumented apps. CORS-open —
+      // the host app's browser code posts here cross-origin.
+      server.middlewares.use('/ingest', async (req, res) => {
+        res.setHeader('access-control-allow-origin', '*')
+        res.setHeader('access-control-allow-methods', 'POST, OPTIONS')
+        res.setHeader('access-control-allow-headers', 'content-type')
+        if (req.method === 'OPTIONS') {
+          res.statusCode = 204
+          res.end()
+          return
+        }
+        if (req.method !== 'POST') {
+          res.statusCode = 405
+          res.end()
+          return
+        }
+        try {
+          const body = await readBody(req)
+          const { normalizeEvent, appendEvents } = await import('./scanner/store.mjs')
+          const raw = Array.isArray((body as { events?: unknown[] }).events) ? (body as { events: unknown[] }).events : [body]
+          const valid = raw.slice(0, 1000).map(normalizeEvent).filter(Boolean)
+          const n = appendEvents(valid)
+          if (n > 0) log(`ingest: ${n} event${n === 1 ? '' : 's'} received`)
+          res.statusCode = 202
+          res.setHeader('content-type', 'application/json')
+          res.end(JSON.stringify({ ok: true, received: n }))
+        } catch (err) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : String(err) }))
+        }
+      })
+
+      // Store: read/clear tracked events for the UI
+      server.middlewares.use(
+        '/api/store/events',
+        json(async (body) => {
+          const { readEvents, storeInfo } = await import('./scanner/store.mjs')
+          if ((body as { countOnly?: boolean }).countOnly) return storeInfo()
+          const events = readEvents().map((e) => ({ userId: e.user_id, event: e.event, ts: e.ts }))
+          return { events, count: events.length }
+        }),
+      )
+      server.middlewares.use(
+        '/api/store/clear',
+        json(async () => {
+          const { clearStore } = await import('./scanner/store.mjs')
+          clearStore()
+          log('store cleared')
+          return { ok: true }
+        }),
+      )
+
+      // Insights: Claude reads the usage summary and flags actionable patterns
+      server.middlewares.use(
+        '/api/insights',
+        json(async (body) => {
+          const { summary, model, apiKey } = body as { summary?: unknown; model?: string; apiKey?: string }
+          if (!summary) throw new Error('Body must include a usage summary')
+          const { findInsights } = await import('./scanner/insights.mjs')
+          const out = await findInsights(summary, { model, apiKey })
+          log(`insights: ${out.insights.length} found (${out.meta.usage.input_tokens} in / ${out.meta.usage.output_tokens} out tokens)`)
+          return out
+        }),
+      )
+
       // Folder picker: list directories on this machine
       server.middlewares.use(
         '/api/fs/list',

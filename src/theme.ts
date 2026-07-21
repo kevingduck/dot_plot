@@ -14,6 +14,7 @@ export interface ThemeColors {
   baseline: string
   weekendWash: string
   hoverWash: string
+  highlightWash: string
   focusRing: string
   series: string[] // categorical slots 1..4
   otherMark: string // fold-in color for events beyond 4 types
@@ -31,6 +32,7 @@ export const COLORS: Record<Mode, ThemeColors> = {
     baseline: '#c3c2b7',
     weekendWash: 'rgba(11,11,11,0.035)',
     hoverWash: 'rgba(11,11,11,0.05)',
+    highlightWash: 'rgba(42,120,214,0.10)',
     focusRing: '#2a78d6',
     series: ['#2a78d6', '#1baf7a', '#eda100', '#008300'],
     otherMark: '#898781',
@@ -46,6 +48,7 @@ export const COLORS: Record<Mode, ThemeColors> = {
     baseline: '#383835',
     weekendWash: 'rgba(255,255,255,0.045)',
     hoverWash: 'rgba(255,255,255,0.07)',
+    highlightWash: 'rgba(57,135,229,0.16)',
     focusRing: '#3987e5',
     series: ['#3987e5', '#199e70', '#c98500', '#008300'],
     otherMark: '#898781',

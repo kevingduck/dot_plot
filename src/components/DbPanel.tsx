@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import type { DbTable, RawEvent } from '../types'
+import type { DbSyncConfig, DbTable, RawEvent } from '../types'
 import { postJson } from '../lib/api'
 
 interface Props {
-  onImport: (events: RawEvent[], source: string) => void
+  onImport: (events: RawEvent[], source: string, sync?: DbSyncConfig) => void
 }
 
 interface ImportResponse {
@@ -58,6 +58,7 @@ export function DbPanel({ onImport }: Props) {
       onImport(
         out.events,
         `${dbName} (read-only import, last ${days}d)` + (failed.length ? ` — ${failed.length} tables failed` : ''),
+        { connectionString: conn.trim(), mappings, days },
       )
       setPhase('review')
     } catch (err) {

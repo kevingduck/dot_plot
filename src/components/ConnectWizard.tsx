@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { DiscoveredProject, EventPlan, RawEvent } from '../types'
+import type { DbSyncConfig, DiscoveredProject, EventPlan, RawEvent } from '../types'
 import { postJson, postNdjson } from '../lib/api'
 import { addRecent, aiParams, getRecents } from '../lib/settings'
 import { DbPanel } from './DbPanel'
@@ -21,9 +21,9 @@ interface DirListing {
 }
 
 interface Props {
-  onData: (events: RawEvent[], source: string, plan: EventPlan) => void
+  onData: (events: RawEvent[], source: string, plan: EventPlan, sync?: DbSyncConfig) => void
   onPlanOnly: (plan: EventPlan) => void
-  onDbImport: (events: RawEvent[], source: string) => void
+  onDbImport: (events: RawEvent[], source: string, sync?: DbSyncConfig) => void
   onImportCsv: () => void
   onImportPlanFile: () => void
   onDemo: () => void
@@ -175,21 +175,22 @@ export function ConnectWizard({ onData, onPlanOnly, onDbImport, onImportCsv, onI
     setPhase('importing')
     try {
       const conn = project.databases[dbIndex].connectionString
-      const out = await postJson<ImportResponse>('/api/db/import', {
-        connectionString: conn,
-        mappings: dbEvents.map((e) => ({
-          table: e.db_mapping!.table,
-          event: e.key,
-          user_column: e.db_mapping!.user_column,
-          timestamp_column: e.db_mapping!.timestamp_column,
-        })),
-        days,
-      })
+      const mappings = dbEvents.map((e) => ({
+        table: e.db_mapping!.table,
+        event: e.key,
+        user_column: e.db_mapping!.user_column,
+        timestamp_column: e.db_mapping!.timestamp_column,
+      }))
+      const out = await postJson<ImportResponse>('/api/db/import', { connectionString: conn, mappings, days })
       if (out.events.length === 0) {
         const errs = out.summary.filter((s) => s.error).map((s) => `${s.table}: ${s.error}`)
         throw new Error(`No events found in the last ${days} days${errs.length ? ` (${errs.join('; ')})` : ''} — try a longer window`)
       }
-      onData(out.events, `${project.name} (live from database, last ${days}d)`, { ...plan, events: acceptedEvents })
+      onData(out.events, `${project.name} (live from database, last ${days}d)`, { ...plan, events: acceptedEvents }, {
+        connectionString: conn,
+        mappings,
+        days,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setPhase('review')

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Dataset, EventPlan, EventType, SortKey } from './types'
+import type { Dataset, DbSyncConfig, EventPlan, EventType, SortKey } from './types'
 import { COLORS, seriesColor, type Mode } from './theme'
 import { generateSample } from './data/generate'
 import { datasetFromEvents, parseCsv, toCsv } from './data/csv'
+import { postJson } from './lib/api'
 import { buildModel, computeStats } from './lib/model'
 import { buildCohorts } from './lib/retention'
 import { DotPlot } from './components/DotPlot'
@@ -11,6 +12,7 @@ import { StatTiles } from './components/StatTiles'
 import { UserDrawer } from './components/UserDrawer'
 import { EventPlanPanel } from './components/EventPlanPanel'
 import { ConnectWizard } from './components/ConnectWizard'
+import { InsightCards } from './components/InsightCards'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ShapeIcon } from './components/ShapeIcon'
 
@@ -32,6 +34,7 @@ const STORE_KEY = 'dotchart:v1'
 interface Persisted {
   dataset: Dataset
   plan: EventPlan | null
+  dbSync?: DbSyncConfig | null
 }
 
 function loadPersisted(): Persisted | null {
@@ -102,6 +105,13 @@ export default function App() {
   const [dataMenuOpen, setDataMenuOpen] = useState(false)
   const planFileRef = useRef<HTMLInputElement>(null)
 
+  // Live tracked events (from /ingest) + database re-sync
+  const [dbSync, setDbSync] = useState<DbSyncConfig | null>(persisted?.dbSync ?? null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [liveCount, setLiveCount] = useState(0)
+  const [highlightUsers, setHighlightUsers] = useState<Set<string> | null>(null)
+  const mergedCountRef = useRef(0)
+
   // Persist real data (not the regenerable sample) across reloads
   useEffect(() => {
     try {
@@ -109,12 +119,82 @@ export default function App() {
         localStorage.removeItem(STORE_KEY)
         return
       }
-      const raw = JSON.stringify({ dataset, plan })
+      const raw = JSON.stringify({ dataset, plan, dbSync })
       if (raw.length < 4_500_000) localStorage.setItem(STORE_KEY, raw)
     } catch {
       /* quota exceeded — skip persistence */
     }
-  }, [dataset, plan])
+  }, [dataset, plan, dbSync])
+
+  // Merge events received via /ingest into the current dataset (deduped)
+  const mergeLiveEvents = useCallback((incoming: { userId: string; event: string; ts: number }[]) => {
+    if (incoming.length === 0) return
+    setDataset((prev) => {
+      const seen = new Set(prev.events.map((e) => `${e.userId}|${e.event}|${e.ts}`))
+      const fresh = incoming.filter((e) => !seen.has(`${e.userId}|${e.event}|${e.ts}`))
+      if (fresh.length === 0) return prev
+      const users = new Map(prev.users.map((u) => [u.id, u]))
+      for (const e of fresh) {
+        if (!users.has(e.userId)) users.set(e.userId, { id: e.userId, name: e.userId, platform: '—', plan: '—', country: '—' })
+      }
+      const events = [...prev.events, ...fresh].sort((a, b) => a.ts - b.ts)
+      let registry = prev.registry
+      const known = new Set(registry.map((t) => t.key))
+      if (fresh.some((e) => !known.has(e.event)) && !known.has('__other__')) {
+        registry = [...registry, { key: '__other__', label: 'Other', shape: 'dot' as const, slot: -1, core: false }]
+      }
+      const source = prev.source.includes(' + live') ? prev.source : `${prev.source} + live`
+      return { ...prev, users: [...users.values()], events, registry, source }
+    })
+    setEnabledEvents((prev) => (prev.has('__other__') ? prev : new Set([...prev, '__other__'])))
+  }, [])
+
+  // Poll the store so tracked events appear on the grid without a reload
+  useEffect(() => {
+    let stopped = false
+    const check = async () => {
+      try {
+        const info = await postJson<{ count: number }>('/api/store/events', { countOnly: true })
+        if (stopped) return
+        setLiveCount(info.count)
+        if (info.count > mergedCountRef.current) {
+          const full = await postJson<{ events: { userId: string; event: string; ts: number }[] }>('/api/store/events', {})
+          if (stopped) return
+          mergedCountRef.current = full.events.length
+          mergeLiveEvents(full.events)
+        }
+      } catch {
+        /* dev server unreachable — retry next tick */
+      }
+    }
+    check()
+    const t = setInterval(check, 15000)
+    return () => {
+      stopped = true
+      clearInterval(t)
+    }
+  }, [mergeLiveEvents])
+
+  // Re-import from the connected database, keeping the registry and plan
+  const refreshDb = useCallback(async () => {
+    if (!dbSync || refreshing) return
+    setRefreshing(true)
+    try {
+      const out = await postJson<{ events: { userId: string; event: string; ts: number }[] }>('/api/db/import', dbSync)
+      if (out.events.length > 0) {
+        setDataset((prev) => {
+          const base = prev.source.replace(/ \+ live$/, '')
+          const ds = datasetFromEvents(out.events, base)
+          return { ...ds, registry: prev.registry, source: base }
+        })
+        mergedCountRef.current = 0 // live events re-merge on the next poll
+      }
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRefreshing(false)
+    }
+  }, [dbSync, refreshing])
   const mode = useMode(themePref)
   const colors = COLORS[mode]
   const fileRef = useRef<HTMLInputElement>(null)
@@ -124,6 +204,7 @@ export default function App() {
   }, [themePref])
 
   const loadDataset = useCallback((ds: Dataset) => {
+    mergedCountRef.current = 0 // live events re-merge into the new dataset
     setDataset(ds)
     setEnabledEvents(new Set(ds.registry.map((t) => t.key)))
     setSelectedUserId(null)
@@ -201,12 +282,13 @@ export default function App() {
 
   // Connect wizard completion: real data + the plan arrive together
   const onWizardData = useCallback(
-    (events: { userId: string; event: string; ts: number }[], source: string, wizardPlan: EventPlan) => {
+    (events: { userId: string; event: string; ts: number }[], source: string, wizardPlan: EventPlan, sync?: DbSyncConfig) => {
       const ds = datasetFromEvents(events, source)
       const registry = registryFromPlan(new Set(ds.events.map((e) => e.event)), wizardPlan.events, wizardPlan.core_event)
       loadDataset(registry ? { ...ds, registry } : ds)
       setPlan(wizardPlan)
       setPlanOpen(true)
+      setDbSync(sync ?? null)
       setWizardOpen(false)
     },
     [loadDataset],
@@ -251,6 +333,16 @@ export default function App() {
         </div>
         <div className="topbar-actions">
           <span className="source-label">{dataset.source}</span>
+          {liveCount > 0 && (
+            <span className="live-chip" title={`${liveCount} events received live via the ingest endpoint`}>
+              ● {liveCount} live
+            </span>
+          )}
+          {dbSync && (
+            <button className="btn" onClick={refreshDb} disabled={refreshing} title="Re-import fresh events from your database (read-only)">
+              {refreshing ? 'Refreshing…' : '↻ Refresh'}
+            </button>
+          )}
           <button className="btn btn-primary" onClick={() => setWizardOpen(!wizardOpen)} aria-expanded={wizardOpen}>
             Connect project
           </button>
@@ -284,6 +376,19 @@ export default function App() {
                 >
                   Load demo data (fictional music app)
                 </button>
+                {liveCount > 0 && (
+                  <button
+                    role="menuitem"
+                    onClick={async () => {
+                      setDataMenuOpen(false)
+                      await postJson('/api/store/clear', {})
+                      mergedCountRef.current = 0
+                      setLiveCount(0)
+                    }}
+                  >
+                    Clear tracked events ({liveCount})
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -327,9 +432,10 @@ export default function App() {
       {wizardOpen && (
         <ConnectWizard
           onData={onWizardData}
-          onDbImport={(events, source) => {
+          onDbImport={(events, source, sync) => {
             try {
               loadDataset(datasetFromEvents(events, source))
+              setDbSync(sync ?? null)
               setWizardOpen(false)
             } catch (err) {
               setImportError(err instanceof Error ? err.message : String(err))
@@ -424,6 +530,8 @@ export default function App() {
 
       <StatTiles stats={stats} coreLabel={coreType?.label ?? 'All'} />
 
+      <InsightCards model={model} dataset={dataset} onHighlight={setHighlightUsers} />
+
       <section className="card card-grid">
         <div className="card-head">
           <div>
@@ -458,7 +566,14 @@ export default function App() {
           </div>
         </div>
         {model.rows.length > 0 ? (
-          <DotPlot model={model} registry={dataset.registry} colors={colors} selectedUserId={selectedUserId} onSelectUser={setSelectedUserId} />
+          <DotPlot
+            model={model}
+            registry={dataset.registry}
+            colors={colors}
+            selectedUserId={selectedUserId}
+            highlightUsers={highlightUsers}
+            onSelectUser={setSelectedUserId}
+          />
         ) : (
           <div className="empty-note">No matching users — adjust the filters, or import a CSV with columns user_id, event, timestamp.</div>
         )}

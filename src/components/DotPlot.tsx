@@ -15,6 +15,7 @@ interface Props {
   registry: EventType[]
   colors: ThemeColors
   selectedUserId: string | null
+  highlightUsers?: Set<string> | null
   onSelectUser: (id: string | null) => void
 }
 
@@ -65,7 +66,7 @@ function drawMark(ctx: CanvasRenderingContext2D, x: number, y: number, r: number
   ctx.fill()
 }
 
-export function DotPlot({ model, registry, colors, selectedUserId, onSelectUser }: Props) {
+export function DotPlot({ model, registry, colors, selectedUserId, highlightUsers, onSelectUser }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [size, setSize] = useState({ w: 800, h: 480 })
@@ -122,6 +123,14 @@ export function DotPlot({ model, registry, colors, selectedUserId, onSelectUser 
 
     const hoveredRow = hover?.row ?? -1
     const selectedRow = selectedUserId ? model.rows.findIndex((r) => r.user.id === selectedUserId) : -1
+    if (highlightUsers && highlightUsers.size > 0) {
+      ctx.fillStyle = colors.highlightWash
+      for (let r = r0; r <= r1; r++) {
+        if (model.rows[r] && highlightUsers.has(model.rows[r].user.id)) {
+          ctx.fillRect(GUTTER_W, rowY(r), w - GUTTER_W, ROW_H)
+        }
+      }
+    }
     for (const r of [selectedRow, hoveredRow]) {
       if (r >= r0 - 1 && r <= r1 + 1 && r >= 0) {
         ctx.fillStyle = colors.hoverWash
@@ -223,7 +232,11 @@ export function DotPlot({ model, registry, colors, selectedUserId, onSelectUser 
         ctx.fillStyle = colors.hoverWash
         ctx.fillRect(0, rowY(r), GUTTER_W, ROW_H)
       }
-      ctx.fillStyle = r === selectedRow ? colors.inkPrimary : colors.inkSecondary
+      if (highlightUsers?.has(row.user.id)) {
+        ctx.fillStyle = colors.highlightWash
+        ctx.fillRect(0, rowY(r), GUTTER_W, ROW_H)
+      }
+      ctx.fillStyle = r === selectedRow ? colors.inkPrimary : highlightUsers?.has(row.user.id) ? colors.focusRing : colors.inkSecondary
       ctx.font = `${r === selectedRow ? 600 : 400} 12px ${FONT}`
       ctx.textAlign = 'left'
       let name = row.user.name
@@ -253,7 +266,7 @@ export function DotPlot({ model, registry, colors, selectedUserId, onSelectUser 
     ctx.moveTo(0, HEADER_H - 0.5)
     ctx.lineTo(GUTTER_W, HEADER_H - 0.5)
     ctx.stroke()
-  }, [model, colors, size, hover, focusCell, selectedUserId, typeByKey, registry])
+  }, [model, colors, size, hover, focusCell, selectedUserId, typeByKey, registry, highlightUsers])
 
   useEffect(() => {
     draw()

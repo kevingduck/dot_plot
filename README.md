@@ -114,14 +114,27 @@ frequency: the top 4 get a slot + shape (the most frequent is treated as the
 core event), the rest fold into "Other". `Export CSV` round-trips the current
 dataset, sample data included — handy as a format reference.
 
+## Live tracking (the closed loop)
+
+The generated SDK posts to `POST /ingest` (CORS-open, batched, validated).
+Set `DOTCHART_INGEST_URL=http://localhost:5199/ingest` in the instrumented
+app's environment and every tracked action lands in `~/.dotchart/events.jsonl`
+and appears on the grid within ~15 seconds — a "● N live" chip shows the feed.
+Database-connected datasets get a **↻ Refresh** button that re-imports
+(read-only) with the saved mappings.
+
+## Insights
+
+**✨ Find patterns** sends a compact per-user usage summary to Claude, which
+does the PayPal-fraud-wall job: 3–5 ranked, concrete observations (churn risks,
+activation hypotheses, streaks worth a customer interview, cadence clusters),
+each clickable to highlight the users it's about on the grid. Costs a few
+cents on the default model.
+
 ## Roadmap
 
-1. ✅ **Dot plot viewer** over imported/sample data.
-2. ✅ **AI codebase scanner** + event-plan review UI (CLI + in-app).
-3. **SDK + ingest** — tiny `track(userId, event, props)` client + endpoint that
-   consume the accepted event plan, plus adapters for data people already have
-   (Segment webhook, PostHog/Amplitude export, plain server logs).
-4. **Instrumentation PRs** — turn accepted plan items into a reviewable diff.
-5. **Pattern spotter & accounts** — AI annotations on the grid (churn-risk
-   accounts, onboarding drop-off, feature→retention hunches), B2B seat
-   activation view, renewal alerts.
+1. ✅ Dot plot viewer · 2. ✅ AI codebase scanner + plan review · 3. ✅
+Branch-based instrumentation · 4. ✅ Read-only DB import + refresh · 5. ✅
+Connect wizard (folder picker / GitHub) · 6. ✅ Ingest endpoint + live grid ·
+7. ✅ AI insight cards. Next: `npx dotchart` packaging, Segment/PostHog
+adapters, B2B accounts view, alerting.

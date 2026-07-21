@@ -117,6 +117,12 @@ export interface InstrumentResult {
   filesChanged: string[]
 }
 
+export interface DbSyncConfig {
+  connectionString: string
+  mappings: { table: string; event: string; user_column: string | null; timestamp_column: string | null }[]
+  days: number
+}
+
 export interface DbTable {
   table: string
   columns: string[]

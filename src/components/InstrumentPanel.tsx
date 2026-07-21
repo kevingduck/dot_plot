@@ -105,9 +105,14 @@ export function InstrumentPanel({ defaultPath, events }: Props) {
             <div className="stat-label">Reject it entirely</div>
             <pre className="instr-snippet">{`git branch -D ${result.branch}`}</pre>
           </div>
+          <div className="instrument-cmds">
+            <div className="stat-label">Turn it on (after merging)</div>
+            <pre className="instr-snippet">{`# in the app's environment (.env), then restart it:
+DOTCHART_INGEST_URL=http://localhost:5199/ingest`}</pre>
+          </div>
           <p className="scan-hint">
-            The instrumentation is inert until you set <code>DOTCHART_INGEST_URL</code> — merged as-is, it changes
-            nothing at runtime.
+            Until that variable is set the instrumentation is inert — merged as-is, it changes nothing at runtime. With
+            it set, every tracked action lands here and appears on the grid within ~15 seconds, no reload needed.
           </p>
           {result.skipped.length > 0 && (
             <p className="scan-hint">Skipped (didn't apply cleanly): {result.skipped.map((s) => `${s.file} (${s.reason})`).join('; ')}</p>
