@@ -89,6 +89,13 @@ export function parseCsv(text: string, fileName: string): Dataset {
 
   if (events.length === 0) throw new Error('No valid rows found (check timestamp format)')
 
+  events.sort((a, b) => a.ts - b.ts)
+  const suffix = skipped > 0 ? `, ${skipped} rows skipped` : ''
+  return { users: [...users.values()], events, registry: buildRegistry(events), source: `${fileName}${suffix}` }
+}
+
+/** Derive the event registry from data: top 4 by frequency get slots/shapes, most frequent is core. */
+export function buildRegistry(events: RawEvent[]): EventType[] {
   const freq = new Map<string, number>()
   for (const e of events) freq.set(e.event, (freq.get(e.event) ?? 0) + 1)
   const ranked = [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([k]) => k)
@@ -103,10 +110,20 @@ export function parseCsv(text: string, fileName: string): Dataset {
   if (ranked.length > 4) {
     registry.push({ key: '__other__', label: `Other (${ranked.length - 4} types)`, shape: 'dot', slot: -1, core: false })
   }
+  return registry
+}
 
-  events.sort((a, b) => a.ts - b.ts)
-  const suffix = skipped > 0 ? `, ${skipped} rows skipped` : ''
-  return { users: [...users.values()], events, registry, source: `${fileName}${suffix}` }
+/** Build a dataset from bare event rows (e.g. a database import). */
+export function datasetFromEvents(events: RawEvent[], source: string): Dataset {
+  const users = new Map<string, User>()
+  for (const e of events) {
+    if (!users.has(e.userId)) {
+      users.set(e.userId, { id: e.userId, name: e.userId, platform: '—', plan: '—', country: '—' })
+    }
+  }
+  if (events.length === 0) throw new Error('No events returned')
+  const sorted = [...events].sort((a, b) => a.ts - b.ts)
+  return { users: [...users.values()], events: sorted, registry: buildRegistry(sorted), source }
 }
 
 export function toCsv(ds: Dataset): string {

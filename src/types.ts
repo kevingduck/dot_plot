@@ -79,6 +79,44 @@ export interface PlannedEvent {
   instrumentation: InstrumentationPoint[]
 }
 
+export interface PreparedEdit {
+  id: string
+  event_key: string
+  file: string
+  old_string: string
+  new_string: string
+  explanation: string
+  status: 'ok' | 'no_match' | 'ambiguous'
+  reason: string
+}
+
+export interface InstrumentPrep {
+  sdk_file: { path: string; content: string }
+  edits: PreparedEdit[]
+  notes: string
+  meta: { target: string; model: string; usage?: { input_tokens: number; output_tokens: number } }
+}
+
+export interface InstrumentResult {
+  branch: string
+  baseBranch: string
+  commit: string
+  applied: PreparedEdit[]
+  skipped: (PreparedEdit & { reason: string })[]
+  filesChanged: string[]
+}
+
+export interface DbTable {
+  table: string
+  columns: string[]
+  user_column: string | null
+  timestamp_column: string | null
+  approx_rows: number
+  eligible: boolean
+  suggested_event: string
+  suggested_label: string
+}
+
 export interface EventPlan {
   product_summary: string
   core_event: string

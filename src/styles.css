@@ -216,6 +216,151 @@ body {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+.scan-divider {
+  height: 1px;
+  background: var(--gridline);
+  margin: 12px 0;
+}
+
+/* ---- instrumentation review ---- */
+.instrument-wrap {
+  border: 1px solid var(--gridline);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.instrument-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.instrument-review-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.edit-item {
+  border: 1px solid var(--gridline);
+  border-radius: 8px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
+}
+.edit-invalid {
+  opacity: 0.55;
+}
+.edit-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.edit-label code {
+  font-size: 11.5px;
+}
+.edit-event {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.edit-explain {
+  display: block;
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+.edit-reason {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.diff {
+  margin: 8px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  border-radius: 6px;
+  border: 1px solid var(--gridline);
+  padding: 6px 0;
+  overflow-x: auto;
+}
+.diff > div {
+  padding: 0 10px;
+  white-space: pre;
+}
+.diff-add {
+  background: color-mix(in srgb, #0ca30c 12%, transparent);
+}
+.diff-sign {
+  display: inline-block;
+  width: 14px;
+  color: var(--text-muted);
+}
+.instrument-done-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.instrument-done p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 6px 0;
+}
+.instrument-cmds .stat-label {
+  margin-top: 8px;
+}
+.instrument-cmds .instr-snippet {
+  border: 1px solid var(--gridline);
+  border-radius: 6px;
+  padding: 6px 9px;
+  margin-top: 3px;
+}
+
+/* ---- db panel ---- */
+.db-review {
+  margin-top: 10px;
+}
+.db-rows {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.db-event-key {
+  font: inherit;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  width: 180px;
+}
+.db-import-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+.db-days {
+  width: 60px;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+}
 
 /* ---- event plan ---- */
 .plan-actions {

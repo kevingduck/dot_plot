@@ -41,6 +41,31 @@ functions. In the review panel you accept/reject events, reassign the core
 event, and export the accepted plan (`dotchart.events.json`) — the contract the
 phase-2 SDK will consume.
 
+## Instrument a codebase — on a branch, with review
+
+From an accepted plan, **Instrument codebase…** turns the events into real
+tracking code without ever touching your working branch:
+
+1. **Propose** — Claude drafts minimal, additive edits (a `track()` call at
+   each success point, an import per file, and a tiny `dotchart.js`/`.ts`
+   client that is a no-op until `DOTCHART_INGEST_URL` is set). Every edit is
+   validated against the file on disk before you see it.
+2. **Review** — each edit is a diff with a checkbox; reject anything.
+3. **Apply** — approved edits are committed to a new `dotchart/…` git branch
+   and your original branch/working tree are left exactly as they were.
+   Refuses to run on a dirty tree. Review with `git diff main...dotchart/…`,
+   merge it, or delete the branch to reject everything.
+
+## Import from a database — read-only
+
+Paste a Postgres connection string ("Scan codebase" → database section): the
+schema is introspected over a session with `default_transaction_read_only=on`
+(Postgres itself rejects any write), tables that look like event streams
+(user column + timestamp column, snake_case or camelCase) are suggested as
+mappings, and only the tables you approve are imported — your existing data
+becomes dots with zero code changes. The connection string is used by the
+local dev server and never stored.
+
 ## What's in the grid
 
 - One row per user, one column per day; weekends shaded.

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { EventPlan, EventTier } from '../types'
+import { InstrumentPanel } from './InstrumentPanel'
 
 const TIER_ORDER: EventTier[] = ['core', 'activation', 'feature', 'noise']
 const TIER_LABEL: Record<EventTier, string> = {
@@ -23,6 +24,7 @@ export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props)
   const [coreKey, setCoreKey] = useState(plan.core_event)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  const [showInstrument, setShowInstrument] = useState(false)
 
   const sorted = useMemo(
     () => [...plan.events].sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier)),
@@ -93,6 +95,9 @@ export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props)
           >
             Apply to grid ({matchedCount} in data)
           </button>
+          <button className="btn" onClick={() => setShowInstrument(!showInstrument)} aria-expanded={showInstrument}>
+            Instrument codebase…
+          </button>
           <button className="btn" onClick={exportAccepted}>
             Export accepted plan
           </button>
@@ -103,6 +108,13 @@ export function EventPlanPanel({ plan, datasetEvents, onApply, onClose }: Props)
       </div>
 
       <p className="plan-summary">{plan.product_summary}</p>
+
+      {showInstrument && (
+        <InstrumentPanel
+          defaultPath={plan.meta?.scanned_path ?? ''}
+          events={plan.events.filter((e) => accepted.has(e.key))}
+        />
+      )}
 
       <table className="plan-table">
         <thead>

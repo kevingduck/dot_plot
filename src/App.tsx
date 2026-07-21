@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dataset, EventPlan, EventType, SortKey } from './types'
 import { COLORS, seriesColor, type Mode } from './theme'
 import { generateSample } from './data/generate'
-import { parseCsv, toCsv } from './data/csv'
+import { datasetFromEvents, parseCsv, toCsv } from './data/csv'
+import { postNdjson } from './lib/api'
 import { buildModel, computeStats } from './lib/model'
 import { buildCohorts } from './lib/retention'
 import { DotPlot } from './components/DotPlot'
@@ -10,6 +11,7 @@ import { RetentionChart } from './components/RetentionChart'
 import { StatTiles } from './components/StatTiles'
 import { UserDrawer } from './components/UserDrawer'
 import { EventPlanPanel } from './components/EventPlanPanel'
+import { DbPanel } from './components/DbPanel'
 import { ShapeIcon } from './components/ShapeIcon'
 
 type ThemePref = 'auto' | 'light' | 'dark'
@@ -144,37 +146,9 @@ export default function App() {
     setScanStartedAt(Date.now())
     setScanElapsed(0)
     try {
-      const res = await fetch('/api/scan', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ path: scanPath.trim() }),
-      })
-      if (!res.body) throw new Error(`Scan failed (${res.status})`)
-      // NDJSON progress stream: status lines, then {done, plan} or {error}
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buf = ''
-      let finished = false
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        let nl
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim()
-          buf = buf.slice(nl + 1)
-          if (!line) continue
-          const msg = JSON.parse(line)
-          if (msg.status) setScanStatus(msg.status)
-          if (msg.error) throw new Error(msg.error)
-          if (msg.done) {
-            setPlan(msg.plan as EventPlan)
-            setScanOpen(false)
-            finished = true
-          }
-        }
-      }
-      if (!finished) throw new Error('Scan stream ended unexpectedly — check the dev-server log')
+      const result = await postNdjson<EventPlan>('/api/scan', { path: scanPath.trim() }, setScanStatus)
+      setPlan(result)
+      setScanOpen(false)
     } catch (err) {
       setScanError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -340,6 +314,17 @@ export default function App() {
             </div>
           )}
           {scanError && <div className="scan-error">⚠ {scanError}</div>}
+          <div className="scan-divider" />
+          <DbPanel
+            onImport={(events, source) => {
+              try {
+                loadDataset(datasetFromEvents(events, source))
+                setScanOpen(false)
+              } catch (err) {
+                setScanError(err instanceof Error ? err.message : String(err))
+              }
+            }}
+          />
         </div>
       )}
 
