@@ -136,6 +136,7 @@ Hard rules:
 - Insert the track call at the point where the action has SUCCEEDED (after the successful write/response, not before validation).
 - Each file that gains a track call also needs the import added once — do that as its own separate edit near the file's other imports (skip if the file already imports it).
 - Use the SDK exactly as: track(userId, 'event_key', { ...small useful props }). Derive userId from what's actually in scope in that code; if no user identifier is in scope, use the closest available (session id, account id) and say so in the explanation.
+- CRITICAL: every identifier in the props object must be PROVABLY in scope at the exact insertion point (declared in the same function, an enclosing scope, or module level — check, don't assume). A single out-of-scope reference throws at runtime and silently kills the event. When any doubt exists, OMIT the prop — a track call with fewer props always beats one that crashes.
 - Only instrument the events and locations provided. If a location can't be instrumented safely, omit it and explain why in notes.
 - Never touch package.json, config files, or tests.`
 

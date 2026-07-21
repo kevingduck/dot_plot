@@ -265,7 +265,12 @@ export default function App() {
       if (fresh.some((e) => !known.has(e.event)) && !known.has('__other__')) {
         registry = [...registry, { key: '__other__', label: 'Other', shape: 'dot' as const, slot: -1, core: false }]
       }
-      const source = prev.source.includes(' + live') ? prev.source : `${prev.source} + live`
+      let source = prev.source
+      if (source.includes('— waiting for first events')) {
+        source = source.replace(/ — waiting for first events.*$/, ' (live tracked events)')
+      } else if (!source.includes(' + live')) {
+        source = `${source} + live`
+      }
       return { ...prev, users: [...users.values()], events, registry, source }
     })
     setEnabledEvents((prev) => (prev.has('__other__') ? prev : new Set([...prev, '__other__'])))
