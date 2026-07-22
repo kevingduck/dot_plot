@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { PROVIDERS, PROVIDER_MODELS, getSettings, saveSettings, type Provider } from '../lib/settings'
 import { postJson } from '../lib/api'
-import { probeOllama } from '../lib/ollamaClient'
+import { getAppMode } from '../lib/mode'
+import { isLocalUrl, probeOllama } from '../lib/ollamaClient'
 
 interface Props {
   onClose: () => void
@@ -31,10 +32,15 @@ export function SettingsPanel({ onClose }: Props) {
     setProbing(true)
     setOllamaError(null)
     // Browser first (reaches the user's own machine), server as fallback
-    // (reaches LAN/tunneled Ollama the browser may not).
+    // (reaches LAN/tunneled Ollama the browser may not). Exception: a hosted
+    // server can NEVER reach the user's localhost — falling back there would
+    // replace the real, actionable browser error with a useless one.
     const p = await probeOllama(url)
     if (p.ok) {
       setOllamaModels(p.models)
+    } else if (getAppMode().hosted && isLocalUrl(url)) {
+      setOllamaModels(null)
+      setOllamaError(p.error ?? 'Could not reach Ollama from this page')
     } else {
       try {
         const r = await postJson<{ models?: string[] }>('/api/keytest', { provider: 'ollama', baseUrl: url })

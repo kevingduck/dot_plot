@@ -77,10 +77,13 @@ function sanitizeWorkspace(ws, file) {
     ws.dataset = null
   } else {
     real.sort((a, b) => a.ts - b.ts)
+    const platformOf = (e) => (e?.os && e?.browser ? `${e.os} · ${e.browser}` : e?.os || e?.browser || '—')
+    const uaByUser = new Map()
+    for (const e of real) if (!uaByUser.has(e.userId) && (e.os || e.browser)) uaByUser.set(e.userId, e)
     const users = [...new Set(real.map((e) => e.userId))].map((id) => ({
       id,
       name: id.startsWith('anon_') ? `Visitor ${id.slice(5, 11)}` : id,
-      platform: '—',
+      platform: platformOf(uaByUser.get(id)),
       plan: '—',
       country: '—',
     }))

@@ -10,6 +10,11 @@ export interface RawEvent {
   userId: string
   event: string
   ts: number // epoch ms
+  // Device info classified from the sender's User-Agent at /ingest
+  // (browser-sent events only — server-side SDKs can't know the device)
+  os?: string
+  browser?: string
+  device?: string
 }
 
 export type Shape = 'circle' | 'square' | 'diamond' | 'triangle' | 'dot'

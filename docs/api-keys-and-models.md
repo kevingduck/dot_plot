@@ -41,8 +41,12 @@ better event plans. Great for trying DotChart out and for insights.
 on a server, but the page runs in *your* browser — so the AI call runs
 directly against your machine. Two one-time steps:
 
-1. Start Ollama with the app's origin allowed:
-   `OLLAMA_ORIGINS=https://your-dotchart-host ollama serve`
+1. Allow the app's origin in Ollama:
+   `OLLAMA_ORIGINS=https://your-dotchart-host ollama serve` — or, if
+   Ollama runs as the desktop/menu-bar app (which already owns the port),
+   set it for the app instead: on macOS
+   `launchctl setenv OLLAMA_ORIGINS https://your-dotchart-host`, then quit
+   and reopen Ollama.
 2. When Chrome asks for **local network access**, allow it.
 
 Your code digest goes to your DotChart server (as with any hosted

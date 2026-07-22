@@ -31,6 +31,13 @@ Each event needs a `user_id`, an `event` name, and a `ts` timestamp
 `~/.dotchart/events.jsonl` on the DotChart host and merge into whatever
 project is on the grid.
 
+**Device info comes free:** when events are sent from the user's browser,
+DotChart classifies the request's User-Agent into OS · browser · device
+class and uses it as the user's platform (filterable above the grid).
+Events sent from your backend can't reveal the end user's device — include
+`os`, `browser`, or `device` fields in the event payload if you want them
+there too.
+
 ## Database projects
 
 If your events already live in your database you may not need ingest at

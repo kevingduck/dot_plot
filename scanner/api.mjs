@@ -257,7 +257,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     '/api/store/events': json(async (body) => {
       const { readEvents, storeInfo } = await import('./store.mjs')
       if (body.countOnly) return storeInfo()
-      const events = readEvents().map((e) => ({ userId: e.user_id, event: e.event, ts: e.ts }))
+      const events = readEvents().map((e) => ({ userId: e.user_id, event: e.event, ts: e.ts, os: e.os, browser: e.browser, device: e.device }))
       return { events, count: events.length }
     }),
     '/api/store/clear': json(async () => {
@@ -315,8 +315,11 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       try {
         const body = await readBody(req)
         const { normalizeEvent, appendEvents } = await import('./store.mjs')
+        const { parseUserAgent } = await import('./ua.mjs')
+        // Browser-sent events carry the end user's device for free
+        const ua = parseUserAgent(req.headers['user-agent'])
         const raw = Array.isArray(body.events) ? body.events : [body]
-        const valid = raw.slice(0, 1000).map(normalizeEvent).filter(Boolean)
+        const valid = raw.slice(0, 1000).map((e) => normalizeEvent(e, ua)).filter(Boolean)
         const n = appendEvents(valid)
         if (n > 0) log(`ingest: ${n} event${n === 1 ? '' : 's'} received`)
         res.statusCode = 202

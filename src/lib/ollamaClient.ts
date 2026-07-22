@@ -17,11 +17,15 @@ export function isLocalUrl(url: string): boolean {
   return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/i.test(url.trim())
 }
 
-/** Can this page reach the given Ollama? Resolves fast, never throws. */
+/**
+ * Can this page reach the given Ollama? Never throws. The generous timeout
+ * matters: on a hosted page, Chrome's local-network permission prompt blocks
+ * the fetch until the user answers — aborting early would kill the prompt.
+ */
 export async function probeOllama(baseUrl: string): Promise<OllamaProbe> {
   const base = baseUrl.trim().replace(/\/+$/, '')
   try {
-    const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(2500) })
+    const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(15000) })
     if (!res.ok) return { ok: false, models: [], error: `Ollama returned ${res.status}` }
     const data = await res.json()
     const models = ((data.models ?? []) as { name?: string }[]).map((m) => m.name ?? '').filter(Boolean)

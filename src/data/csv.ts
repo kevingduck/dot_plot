@@ -114,12 +114,21 @@ export function buildRegistry(events: RawEvent[]): EventType[] {
 }
 
 /** Build a dataset from bare event rows (e.g. a database import). */
+/** "macOS · Chrome"-style platform label from an event's ingest device info. */
+export function platformFromEvent(e: RawEvent): string {
+  if (e.os && e.browser) return `${e.os} · ${e.browser}`
+  return e.os || e.browser || '—'
+}
+
 export function datasetFromEvents(events: RawEvent[], source: string): Dataset {
   const users = new Map<string, User>()
   for (const e of events) {
     if (!users.has(e.userId)) {
       const name = e.userId.startsWith('anon_') ? `Visitor ${e.userId.slice(5, 11)}` : e.userId
-      users.set(e.userId, { id: e.userId, name, platform: '—', plan: '—', country: '—' })
+      users.set(e.userId, { id: e.userId, name, platform: platformFromEvent(e), plan: '—', country: '—' })
+    } else if (users.get(e.userId)!.platform === '—') {
+      const p = platformFromEvent(e)
+      if (p !== '—') users.get(e.userId)!.platform = p
     }
   }
   if (events.length === 0) throw new Error('No events returned')

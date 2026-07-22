@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dataset, DbSyncConfig, EventPlan, EventType, SortKey } from './types'
 import { COLORS, seriesColor, type Mode } from './theme'
 import { generateSample } from './data/generate'
-import { datasetFromEvents, parseCsv, toCsv } from './data/csv'
+import { datasetFromEvents, parseCsv, platformFromEvent, toCsv } from './data/csv'
 import { postJson } from './lib/api'
 import { fetchAppMode, setAccessKey, type AppMode } from './lib/mode'
 import { buildModel, computeStats } from './lib/model'
@@ -154,6 +154,10 @@ export default function App() {
   const [plan, setPlan] = useState<EventPlan | null>(persisted?.plan ?? null)
   const [planOpen, setPlanOpen] = useState(persisted?.plan != null)
   const [dataMenuOpen, setDataMenuOpen] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
+  useEffect(() => {
+    if (!dataMenuOpen) setConfirmClear(false)
+  }, [dataMenuOpen])
   const planFileRef = useRef<HTMLInputElement>(null)
 
   // Live tracked events (from /ingest) + database re-sync
@@ -273,9 +277,13 @@ export default function App() {
       if (fresh.length === 0) return prev
       const users = new Map(prev.users.map((u) => [u.id, u]))
       for (const e of fresh) {
-        if (!users.has(e.userId)) {
+        const existing = users.get(e.userId)
+        if (!existing) {
           const name = e.userId.startsWith('anon_') ? `Visitor ${e.userId.slice(5, 11)}` : e.userId
-          users.set(e.userId, { id: e.userId, name, platform: '—', plan: '—', country: '—' })
+          users.set(e.userId, { id: e.userId, name, platform: platformFromEvent(e), plan: '—', country: '—' })
+        } else if (existing.platform === '—') {
+          const p = platformFromEvent(e)
+          if (p !== '—') users.set(e.userId, { ...existing, platform: p })
         }
       }
       const events = [...prev.events, ...fresh].sort((a, b) => a.ts - b.ts)
@@ -610,18 +618,34 @@ export default function App() {
                 >
                   Load demo data (fictional music app)
                 </button>
-                {liveCount > 0 && (
-                  <button
-                    role="menuitem"
-                    onClick={async () => {
-                      setDataMenuOpen(false)
-                      await postJson('/api/store/clear', {})
-                      mergedCountRef.current = 0
-                      setLiveCount(0)
-                    }}
-                  >
-                    Clear tracked events ({liveCount})
+                {liveCount > 0 && !confirmClear && (
+                  <button role="menuitem" onClick={() => setConfirmClear(true)}>
+                    Clear tracked events ({liveCount})…
                   </button>
+                )}
+                {liveCount > 0 && confirmClear && (
+                  <div className="menu-confirm" role="alert">
+                    <div>
+                      ⚠ Permanently delete all <strong>{liveCount}</strong> tracked events? This empties the raw ingest
+                      store — it is shared by <strong>every</strong> project and cannot be undone.
+                    </div>
+                    <div className="menu-confirm-actions">
+                      <button
+                        className="btn btn-danger"
+                        onClick={async () => {
+                          setDataMenuOpen(false)
+                          await postJson('/api/store/clear', {})
+                          mergedCountRef.current = 0
+                          setLiveCount(0)
+                        }}
+                      >
+                        Delete permanently
+                      </button>
+                      <button className="btn btn-ghost" onClick={() => setConfirmClear(false)}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}

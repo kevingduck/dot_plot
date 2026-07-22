@@ -11,10 +11,21 @@ environment instead.
 ## DotChart can't see my Ollama
 
 1. Is it running? `curl localhost:11434/api/tags` should return JSON.
-2. Using a hosted DotChart? Ollama must allow the app's origin — restart
-   it with `OLLAMA_ORIGINS=https://your-dotchart-host ollama serve` — and
-   Chrome will ask for local-network permission the first time (allow it).
-3. Remote Ollama (LAN box, tunnel): put its URL in ⚙ Settings and hit
+2. Using a hosted DotChart? Ollama must allow the app's origin, and the
+   variable must reach the instance that actually owns the port. **If
+   Ollama runs as the desktop/menu-bar app**, a terminal
+   `OLLAMA_ORIGINS=… ollama serve` silently fails (port already taken) —
+   either quit the app first and run that command, or keep the app and set
+   the variable for it: on macOS `launchctl setenv OLLAMA_ORIGINS
+   https://your-dotchart-host`, then quit and reopen Ollama.
+3. Verify the CORS setup independently of DotChart:
+   `curl -i -X OPTIONS http://localhost:11434/api/tags -H "Origin:
+   https://your-dotchart-host" -H "Access-Control-Request-Method: GET"` —
+   a 403 means the origin isn't allowed yet; 204/200 means it is.
+4. Chrome asks for **local network access** the first time the page
+   touches localhost — allow it. If you dismissed it, re-enable via the
+   site settings (icon left of the URL bar).
+5. Remote Ollama (LAN box, tunnel): put its URL in ⚙ Settings and hit
    "Detect models".
 
 ## My tracked events don't appear

@@ -11,8 +11,12 @@ const FILE = path.join(DIR, 'events.jsonl')
 
 const EVENT_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/
 
-/** Validate + normalize one incoming event; returns null if unusable. */
-export function normalizeEvent(raw) {
+/**
+ * Validate + normalize one incoming event; returns null if unusable.
+ * `ua` — optional {os, browser, device} classified from the request's
+ * User-Agent (browser-sent events only); explicit payload fields win.
+ */
+export function normalizeEvent(raw, ua = null) {
   if (!raw || typeof raw !== 'object') return null
   const userId = String(raw.user_id ?? raw.userId ?? '').slice(0, 128)
   const event = String(raw.event ?? '').slice(0, 64)
@@ -23,6 +27,10 @@ export function normalizeEvent(raw) {
     if (!Number.isNaN(t) && t > 0) ts = t
   }
   const out = { user_id: userId, event, ts }
+  for (const key of ['os', 'browser', 'device']) {
+    const v = raw[key] ?? ua?.[key]
+    if (typeof v === 'string' && v) out[key] = v.slice(0, 32)
+  }
   if (raw.props && typeof raw.props === 'object') {
     const propsStr = JSON.stringify(raw.props)
     if (propsStr.length <= 2000) out.props = raw.props

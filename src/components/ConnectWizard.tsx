@@ -541,8 +541,11 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
                     Couldn't reach Ollama from this page.{' '}
                     {hosted ? (
                       <>
-                        Start it with this page allowed, then re-detect:{' '}
-                        <code>OLLAMA_ORIGINS={window.location.origin} ollama serve</code>
+                        Ollama must allow this page's origin:{' '}
+                        <code>OLLAMA_ORIGINS={window.location.origin} ollama serve</code> — and if Ollama runs as the{' '}
+                        <strong>menu-bar app</strong>, that command can't take the port; instead run{' '}
+                        <code>launchctl setenv OLLAMA_ORIGINS {window.location.origin}</code> (macOS) and restart the
+                        app. Then re-detect and allow Chrome's local-network prompt.
                       </>
                     ) : (
                       <>
