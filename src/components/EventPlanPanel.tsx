@@ -36,7 +36,9 @@ function guessMatch(planKey: string, datasetNames: string[]): string {
       bestScore = score
     }
   }
-  return bestScore >= 1 ? best : ''
+  // Two shared tokens (or containment) required — a single common word like
+  // "selected" must never marry events from two different products
+  return bestScore >= 2 ? best : ''
 }
 
 export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, onClose }: Props) {

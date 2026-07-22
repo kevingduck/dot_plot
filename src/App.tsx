@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Dataset, DbSyncConfig, EventPlan, EventType, SortKey } from './types'
+import type { Dataset, DbSyncConfig, EventPlan, EventType, RawEvent, SortKey } from './types'
 import { COLORS, seriesColor, type Mode } from './theme'
 import { generateSample } from './data/generate'
 import { datasetFromEvents, parseCsv, platformFromEvent, toCsv } from './data/csv'
@@ -259,11 +259,16 @@ export default function App() {
   // Merge events received via /ingest into the current dataset (deduped).
   // If the grid is showing demo data, real events REPLACE it — fictional and
   // real users must never mix.
-  const mergeLiveEvents = useCallback((incoming: { userId: string; event: string; ts: number }[]) => {
+  const mergeLiveEvents = useCallback((incoming: RawEvent[]) => {
     if (datasetRef.current.source === NO_PROJECT) return // nothing to attach events to yet
-    // Merge permissively: plan key names drift from what instrumented apps
-    // actually send, and key-claim heuristics eat real events. True
-    // multi-project separation comes with per-project ingest tokens.
+    // The ingest store is shared, so scope it to the active project: accept
+    // events the active plan claims, plus events no OTHER saved project
+    // claims (drift tolerance for hand-added track() calls). Anything
+    // claimed elsewhere belongs to that project's grid, not this one.
+    // Airtight separation arrives with per-project ingest tokens.
+    const activeKeys = plan ? new Set(plan.events.map((e) => e.key)) : null
+    const claimedElsewhere = new Set(workspaces.filter((w) => w.path !== projectKey).flatMap((w) => w.planKeys ?? []))
+    incoming = incoming.filter((e) => activeKeys?.has(e.event) || !claimedElsewhere.has(e.event))
     if (incoming.length === 0) return
     if (datasetRef.current.source.startsWith('Sample data')) {
       const ds = datasetFromEvents(incoming, 'Live tracked events')
@@ -301,7 +306,7 @@ export default function App() {
       return { ...prev, users: [...users.values()], events, registry, source }
     })
     setEnabledEvents((prev) => (prev.has('__other__') ? prev : new Set([...prev, '__other__'])))
-  }, [plan, loadDataset])
+  }, [plan, loadDataset, workspaces, projectKey])
 
   // Poll the store so tracked events appear on the grid without a reload
   useEffect(() => {
@@ -369,10 +374,17 @@ export default function App() {
         } else {
           // Workspace saved before real data existed — chart the live store,
           // or an empty waiting state. NEVER demo data inside a project.
-          const store = await postJson<{ events: { userId: string; event: string; ts: number }[] }>('/api/store/events', {})
+          const store = await postJson<{ events: RawEvent[] }>('/api/store/events', {})
           const name = (ws as { name?: string }).name ?? slug
-          if (store.events.length > 0 && ws.plan) {
-            const ds = datasetFromEvents(store.events, `${name} (live tracked events)`)
+          // Same scoping as the live merge: this workspace's plan keys, plus
+          // events no other project claims. The list is fetched fresh — on
+          // boot this runs before the workspaces state has loaded.
+          const wsKeys = ws.plan ? new Set(ws.plan.events.map((e) => e.key)) : null
+          const list = (await postJson<{ projects: WorkspaceSummary[] }>('/api/projects/list', {})).projects
+          const claimed = new Set(list.filter((w) => w.slug !== slug).flatMap((w) => w.planKeys ?? []))
+          const scoped = store.events.filter((e) => wsKeys?.has(e.event) || !claimed.has(e.event))
+          if (scoped.length > 0 && ws.plan) {
+            const ds = datasetFromEvents(scoped, `${name} (live tracked events)`)
             const registry = registryFromPlan(new Set(ds.events.map((e) => e.event)), ws.plan.events, ws.plan.core_event)
             loadDataset(registry ? { ...ds, registry } : ds)
             mergedCountRef.current = store.events.length
@@ -470,6 +482,8 @@ export default function App() {
       setPlan(wizardPlan)
       setPlanOpen(true)
       setDbSync(sync ?? null)
+      setInsightsSaved(null) // a different project's insights must not carry over
+      setHighlightUsers(null)
       setWizardOpen(false)
     },
     [loadDataset],
@@ -755,8 +769,17 @@ export default function App() {
             setWizardOpen(false)
           }}
           onPlanOnly={(p) => {
+            // A NEW project with no importable data starts from its own empty
+            // waiting state — never on top of the previous project's grid
+            const name = (p.meta?.scanned_path ?? 'project').replace(/^local:/, '').split('/').pop()
+            const keys = new Set(p.events.map((e) => e.key))
+            const registry = registryFromPlan(keys, p.events, p.core_event) ?? []
+            loadDataset({ users: [], events: [], registry, source: `${name} — waiting for first events` })
             setPlan(p)
             setPlanOpen(true)
+            setDbSync(null)
+            setInsightsSaved(null)
+            setHighlightUsers(null)
             setWizardOpen(false)
           }}
           onClose={() => setWizardOpen(false)}
