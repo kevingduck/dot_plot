@@ -98,6 +98,10 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
     () => [...plan.events].sort((a, b) => TIER_ORDER.indexOf(a.tier) - TIER_ORDER.indexOf(b.tier)),
     [plan],
   )
+  // Dataset keys not exactly claimed by any plan event — the only situation
+  // where a mapping selector earns its place
+  const unclaimedNames = useMemo(() => datasetNames.filter((n) => !planKeySet.has(n)), [datasetNames, planKeySet])
+
   // Accepted plan events resolved to dataset event names (deduped per target)
   const mappedPairs = useMemo(() => {
     const used = new Set<string>()
@@ -283,9 +287,12 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
                       ? `● reporting data${!datasetEvents.has(e.key) && mapping.get(e.key) ? ` (as ${mapping.get(e.key)})` : ''}`
                       : e.db_mapping?.table
                         ? `◐ in your database (${e.db_mapping.table}) — import via Connect`
-                        : '○ not tracked yet'}
+                        : '○ no events yet'}
                   </div>
-                  {datasetNames.length > 0 && !datasetIsDemo && (
+                  {datasetNames.length > 0 &&
+                    !datasetIsDemo &&
+                    ((reportingKeys.has(e.key) && !datasetEvents.has(e.key)) ||
+                      (!reportingKeys.has(e.key) && unclaimedNames.length > 0)) && (
                     <div className="plan-map">
                       in your data:{' '}
                       <select

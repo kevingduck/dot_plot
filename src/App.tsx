@@ -208,6 +208,24 @@ export default function App() {
     return () => clearTimeout(t)
   }, [projectKey, dataset, plan, dbSync, insightsSaved, refreshWorkspaces])
 
+  // Keep the grid legend aligned with the plan: when event types that the
+  // plan knows about appear later (e.g. the first STL export), promote them
+  // into the registry instead of leaving them under "Other".
+  useEffect(() => {
+    if (!plan) return
+    const names = new Set(dataset.events.map((e) => e.event))
+    if (names.size === 0) return
+    const planKeySet = new Set(plan.events.map((e) => e.key))
+    const expected = registryFromPlan(names, plan.events, plan.core_event)
+    if (!expected) return
+    const curPlanCount = dataset.registry.filter((t) => planKeySet.has(t.key)).length
+    const expCount = expected.filter((t) => t.key !== '__other__').length
+    if (expCount > curPlanCount) {
+      setDataset((prev) => ({ ...prev, registry: expected }))
+      setEnabledEvents(new Set(expected.map((t) => t.key)))
+    }
+  }, [dataset, plan])
+
   // Persist real data (not the regenerable sample) across reloads
   useEffect(() => {
     try {
