@@ -122,8 +122,9 @@ only a filtered code digest.
 
 ## Documentation
 
-In-app via the **?** button (same pages, works hosted), or in
-[`docs/`](docs/): [getting started](docs/getting-started.md) ·
+Every DotChart serves its own docs at `/docs` — the **?** button in the top
+bar opens them in a new tab (open even on password-protected deployments).
+Same pages in [`docs/`](docs/): [getting started](docs/getting-started.md) ·
 [connect your project](docs/connect-your-project.md) ·
 [reading the grid](docs/reading-the-grid.md) ·
 [AI providers & models](docs/api-keys-and-models.md) ·

@@ -15,7 +15,6 @@ import { EventPlanPanel } from './components/EventPlanPanel'
 import { ConnectWizard } from './components/ConnectWizard'
 import { InsightCards, type InsightsResponse } from './components/InsightCards'
 import { SettingsPanel } from './components/SettingsPanel'
-import { HelpPanel } from './components/HelpPanel'
 import { OnboardingChecklist } from './components/OnboardingChecklist'
 import { ShapeIcon } from './components/ShapeIcon'
 
@@ -119,7 +118,6 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(() => persisted === null)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [helpPage, setHelpPage] = useState<string | null>(null)
   const [appMode, setAppMode] = useState<AppMode>({ hosted: false, authRequired: false, hasServerKey: true })
   const [modeReady, setModeReady] = useState(false)
   const [authOk, setAuthOk] = useState(true)
@@ -628,15 +626,9 @@ export default function App() {
               </div>
             )}
           </div>
-          <button
-            className="btn btn-icon"
-            onClick={() => setHelpPage(helpPage ? null : 'getting-started')}
-            title="Help & documentation"
-            aria-label="Help"
-            aria-expanded={helpPage != null}
-          >
+          <a className="btn btn-icon" href="/docs" target="_blank" rel="noreferrer" title="Documentation (opens in a new tab)" aria-label="Documentation">
             ?
-          </button>
+          </a>
           <button
             className="btn btn-icon"
             onClick={() => setSettingsOpen(!settingsOpen)}
@@ -711,12 +703,10 @@ export default function App() {
           loadDataset(generateSample(next))
         }}
         onConnect={() => setWizardOpen(true)}
-        onHelp={setHelpPage}
+        onHelp={(slug) => window.open(`/docs/${slug}`, '_blank')}
       />
 
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onHelp={() => setHelpPage('api-keys-and-models')} />}
-
-      {helpPage != null && <HelpPanel page={helpPage} onNavigate={setHelpPage} onClose={() => setHelpPage(null)} />}
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
 
       {wizardOpen && modeReady && (
         <ConnectWizard
@@ -879,9 +869,9 @@ export default function App() {
               app sends its first <code>track()</code> call, it appears here (checked every ~15 seconds, no reload
               needed). Make sure the app's environment has:
               <pre className="instr-snippet">DOTCHART_INGEST_URL={window.location.origin}/ingest</pre>
-              <button className="link-btn" onClick={() => setHelpPage('live-tracking')}>
+              <a className="link-btn" href="/docs/live-tracking" target="_blank" rel="noreferrer">
                 How live tracking works
-              </button>
+              </a>
             </div>
           </div>
         ) : model.rows.length > 0 ? (

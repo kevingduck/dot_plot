@@ -280,6 +280,17 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
   return async function handle(req, res) {
     const url = (req.url ?? '').split('?')[0]
 
+    // Documentation pages — always open (no user data), rendered from docs/*.md
+    if (url === '/docs' || url.startsWith('/docs/')) {
+      if (req.method !== 'GET') return false
+      const { renderDocsPage } = await import('./docs.mjs')
+      const html = renderDocsPage(url === '/docs' ? '' : decodeURIComponent(url.slice('/docs/'.length)))
+      res.statusCode = html ? 200 : 404
+      res.setHeader('content-type', 'text/html; charset=utf-8')
+      res.end(html ?? '<!doctype html><title>Not found</title><p>No such docs page — <a href="/docs">index</a>')
+      return true
+    }
+
     if (url === '/health') {
       const { storeInfo } = await import('./store.mjs')
       res.setHeader('content-type', 'application/json')

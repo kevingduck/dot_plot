@@ -5,7 +5,6 @@ import { probeOllama } from '../lib/ollamaClient'
 
 interface Props {
   onClose: () => void
-  onHelp?: () => void
 }
 
 interface ServerKeys {
@@ -13,7 +12,7 @@ interface ServerKeys {
   openai: boolean
 }
 
-export function SettingsPanel({ onClose, onHelp }: Props) {
+export function SettingsPanel({ onClose }: Props) {
   const [settings, setSettings] = useState(getSettings)
   const [serverKeys, setServerKeys] = useState<ServerKeys | null>(null)
   const [saved, setSaved] = useState(false)
@@ -149,14 +148,10 @@ export function SettingsPanel({ onClose, onHelp }: Props) {
               {serverKeys?.[provider] === false && !settings.keys[provider]
                 ? 'No key found on the server — paste yours here to enable AI analysis.'
                 : 'Stored only in this browser; sent to the server per request and used for that call only.'}
-              {onHelp && (
-                <>
-                  {' '}
-                  <button className="link-btn" onClick={onHelp}>
-                    About providers, models &amp; cost
-                  </button>
-                </>
-              )}
+              {' '}
+              <a className="link-btn" href="/docs/api-keys-and-models" target="_blank" rel="noreferrer">
+                About providers, models &amp; cost
+              </a>
             </div>
           </div>
         </>
@@ -196,15 +191,10 @@ export function SettingsPanel({ onClose, onHelp }: Props) {
           {ollamaError && <div className="scan-error">⚠ {ollamaError}</div>}
           <div className="settings-hint">
             Free and private — analysis runs on this machine and nothing is sent to a cloud AI. Local models are weaker
-            than Claude on large codebases; larger models give better plans.
-            {onHelp && (
-              <>
-                {' '}
-                <button className="link-btn" onClick={onHelp}>
-                  Setup help
-                </button>
-              </>
-            )}
+            than Claude on large codebases; larger models give better plans.{' '}
+            <a className="link-btn" href="/docs/api-keys-and-models" target="_blank" rel="noreferrer">
+              Setup help
+            </a>
           </div>
         </div>
       )}

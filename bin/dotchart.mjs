@@ -90,7 +90,7 @@ if (ready) {
   console.log(`
   DotChart is running:   ${url}
   Ingest endpoint:       ${url}/ingest
-  Docs:                  the ? button in the top bar
+  Docs:                  ${url}/docs
 `)
   if (!has('--no-open')) {
     const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open'
