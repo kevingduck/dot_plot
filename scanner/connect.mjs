@@ -325,8 +325,8 @@ export function finishAnalysis(plan, ctx, { model, provider, usage, onStatus = (
   }
 }
 
-export async function analyzeProject(targetPath, connectionString, { onStatus = () => {}, model, apiKey, provider, baseUrl, prebuilt } = {}) {
-  const ai = resolveAi({ provider, model, apiKey, baseUrl })
+export async function analyzeProject(targetPath, connectionString, { onStatus = () => {}, model, apiKey, provider, baseUrl, allowEnvKey, prebuilt } = {}) {
+  const ai = resolveAi({ provider, model, apiKey, baseUrl, allowEnvKey })
   const { request, ctx } = await buildAnalysisRequest(targetPath, connectionString, { onStatus, prebuilt })
 
   onStatus(`Asking ${aiLabel(ai)} to analyze the product…`)

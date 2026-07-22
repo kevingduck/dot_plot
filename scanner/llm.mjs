@@ -67,20 +67,22 @@ function normalizeBaseUrl(raw) {
  * into a validated config, falling back to server keys and defaults.
  * Throws with a settings-pointing message when no usable auth exists.
  */
-export function resolveAi({ provider, model, apiKey, baseUrl } = {}) {
+export function resolveAi({ provider, model, apiKey, baseUrl, allowEnvKey = true } = {}) {
   const p = PROVIDERS.includes(provider) ? provider : 'anthropic'
   let m = typeof model === 'string' && MODEL_RE.test(model.trim()) ? model.trim() : ''
 
+  // allowEnvKey=false: multi-account deployments reserve the server's env
+  // keys for the instance owner — everyone else brings their own key
   if (p === 'anthropic') {
     if (!ANTHROPIC_MODELS.includes(m)) m = DEFAULTS.anthropic
-    const key = apiKey || envKey('ANTHROPIC_API_KEY')
-    if (!key) throw new Error('No Anthropic API key — add yours in ⚙ Settings, or set ANTHROPIC_API_KEY on the server')
+    const key = apiKey || (allowEnvKey ? envKey('ANTHROPIC_API_KEY') : null)
+    if (!key) throw new Error('No Anthropic API key — add yours in ⚙ Settings (or use a local Ollama model, free)')
     return { provider: p, model: m, apiKey: key }
   }
   if (p === 'openai') {
     if (!m) m = DEFAULTS.openai
-    const key = apiKey || envKey('OPENAI_API_KEY')
-    if (!key) throw new Error('No OpenAI API key — add yours in ⚙ Settings, or set OPENAI_API_KEY on the server')
+    const key = apiKey || (allowEnvKey ? envKey('OPENAI_API_KEY') : null)
+    if (!key) throw new Error('No OpenAI API key — add yours in ⚙ Settings (or use a local Ollama model, free)')
     return { provider: p, model: m, apiKey: key }
   }
   // ollama

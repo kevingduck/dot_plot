@@ -53,8 +53,8 @@ export function finishInsights(out, { model, provider, usage } = {}) {
   return { insights: out.insights.slice(0, 5), meta: { model, provider, usage } }
 }
 
-export async function findInsights(summary, { model, apiKey, provider, baseUrl } = {}) {
-  const ai = resolveAi({ provider, model, apiKey, baseUrl })
+export async function findInsights(summary, { model, apiKey, provider, baseUrl, allowEnvKey } = {}) {
+  const ai = resolveAi({ provider, model, apiKey, baseUrl, allowEnvKey })
   const { object, usage } = await runStructured(ai, buildInsightsRequest(summary))
   return finishInsights(object, { model: ai.model, provider: ai.provider, usage })
 }

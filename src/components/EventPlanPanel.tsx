@@ -217,35 +217,25 @@ export function EventPlanPanel({ plan, ingestPath = '/ingest', datasetEvents, da
         </p>
       )}
 
-      {instrumentStarted && getAppMode().hosted && (
-        <div className="instrument-wrap" style={{ display: showInstrument ? undefined : 'none' }}>
-          {reportingCount > 0 ? (
-            <p className="scan-hint" style={{ marginTop: 0 }}>
-              <strong>✓ Tracking is live.</strong> {reportingCount} of {accepted.size} accepted events are already
-              reporting from your deployed app — there's nothing more to set up here. The remaining events start
-              reporting automatically once the app sends them; to add their track() calls, each event's "Where" column
-              has the exact snippet and location.
-            </p>
-          ) : (
-            <p className="scan-hint" style={{ marginTop: 0 }}>
-              <strong>Getting the track() calls into your code, from the hosted app:</strong> either run DotChart
-              locally (<code>npm run dev</code>) and open this project there — it writes the changes for you on a git
-              branch — or copy each event's snippet from the "Where" column below into the shown file by hand. Once the
-              instrumented app is deployed with its ingest URL set to <code>{window.location.origin}{ingestPath}</code>,
-              events appear here automatically. Already deployed the instrumentation? Then you're done — just wait for
-              the first event.
-            </p>
-          )}
-        </div>
-      )}
-      {instrumentStarted && !getAppMode().hosted && (
+      {instrumentStarted && (
         <div style={{ display: showInstrument ? undefined : 'none' }}>
-          <InstrumentPanel
-            autoStart
-            defaultPath={plan.meta?.scanned_path ?? ''}
-            ingestPath={ingestPath}
-            events={plan.events.filter((e) => accepted.has(e.key))}
-          />
+          {getAppMode().hosted && reportingCount > 0 ? (
+            <div className="instrument-wrap">
+              <p className="scan-hint" style={{ marginTop: 0 }}>
+                <strong>✓ Tracking is live.</strong> {reportingCount} of {accepted.size} accepted events are already
+                reporting from your deployed app — there's nothing more to set up here. The remaining events start
+                reporting automatically once the app sends them; to add their track() calls, each event's "Where"
+                column has the exact snippet and location.
+              </p>
+            </div>
+          ) : (
+            <InstrumentPanel
+              autoStart
+              defaultPath={plan.meta?.scanned_path ?? ''}
+              ingestPath={ingestPath}
+              events={plan.events.filter((e) => accepted.has(e.key))}
+            />
+          )}
         </div>
       )}
 

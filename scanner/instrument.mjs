@@ -130,8 +130,8 @@ Hard rules:
  * Stage 1 — propose edits. Read-only: returns {sdk_file, edits[], notes};
  * each edit pre-validated with status 'ok' | 'no_match' | 'ambiguous'.
  */
-export async function prepareInstrumentation(targetPath, events, { onStatus = () => {}, model, apiKey, provider, baseUrl } = {}) {
-  const ai = resolveAi({ provider, model, apiKey, baseUrl })
+export async function prepareInstrumentation(targetPath, events, { onStatus = () => {}, model, apiKey, provider, baseUrl, allowEnvKey } = {}) {
+  const ai = resolveAi({ provider, model, apiKey, baseUrl, allowEnvKey })
   const root = path.resolve(targetPath)
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`Not a directory: ${root}`)
 
@@ -238,6 +238,29 @@ ${fileBlobs}`
       usage,
     },
   }
+}
+
+/**
+ * Push a dotchart/* branch to the repo's GitHub origin with a one-time
+ * token (hosted flow: the clone lives on the server, the review happens on
+ * GitHub). The token goes only into this single git invocation.
+ */
+export function pushBranch(targetPath, branch, baseBranch, token) {
+  const root = path.resolve(targetPath)
+  const origin = git(root, ['remote', 'get-url', 'origin'])
+  const m = origin.match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/)
+  if (!m) throw new Error('This repository has no GitHub origin to push to')
+  const slug = m[1]
+  try {
+    git(root, ['push', `https://x-access-token:${encodeURIComponent(token)}@github.com/${slug}.git`, `${branch}:${branch}`])
+  } catch (err) {
+    const detail = String(err.stderr || err.message || '').split(token).join('••••')
+    if (/403|permission|denied|authentication/i.test(detail)) {
+      throw new Error('GitHub rejected the push — the token needs Contents: read & write access to this repository')
+    }
+    throw new Error(`Push failed: ${detail.slice(0, 300)}`)
+  }
+  return { compareUrl: `https://github.com/${slug}/compare/${encodeURIComponent(baseBranch)}...${encodeURIComponent(branch)}?expand=1` }
 }
 
 /**

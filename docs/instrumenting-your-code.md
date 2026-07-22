@@ -19,6 +19,18 @@ branch, never on your working tree.
 Review with `git diff main...dotchart/<branch>`, merge when happy, or just
 delete the branch to throw everything away.
 
+## On a hosted DotChart
+
+Projects connected **via GitHub** get the same flow, ending in a push: after
+you approve the edits, paste a GitHub token with write access to the repo
+(used once for the push, never stored) — DotChart pushes the `dotchart/*`
+branch and hands you the pull-request link to review and merge.
+
+Projects connected with the **browser folder picker** can't be edited by
+the server (it never had the files): reconnect the project from GitHub for
+the one-click flow above, or copy each event's snippet from the plan's
+"Where" column by hand.
+
 ## The generated client
 
 The `dotchart` client is a no-op until you set an environment variable in

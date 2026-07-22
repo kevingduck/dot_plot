@@ -1299,6 +1299,17 @@ button.picker-row:hover {
   flex: 1;
 }
 
+.instrument-token {
+  margin: 8px 0;
+}
+.instrument-options {
+  margin: 4px 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* ---- accounts ---- */
 .auth-form {
   display: flex;

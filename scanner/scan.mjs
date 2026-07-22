@@ -220,8 +220,8 @@ Principles:
 - Instrumentation points must reference real files and functions from the provided code, with a concrete one-line tracking call using dotchart.track(userId, 'event_key', props).
 - If the codebase is a frontend-only or library project, still propose the events its END USERS would generate, instrumented at the closest real code location.`
 
-export async function scanCodebase(targetPath, { onStatus = () => {}, model, apiKey, provider, baseUrl } = {}) {
-  const ai = resolveAi({ provider, model, apiKey, baseUrl })
+export async function scanCodebase(targetPath, { onStatus = () => {}, model, apiKey, provider, baseUrl, allowEnvKey } = {}) {
+  const ai = resolveAi({ provider, model, apiKey, baseUrl, allowEnvKey })
 
   const root = path.resolve(targetPath)
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {

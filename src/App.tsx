@@ -768,6 +768,7 @@ export default function App() {
       </div>
 
       <OnboardingChecklist
+        storageSuffix={appMode.user?.email}
         flags={{
           demo: dataset.source.startsWith('Sample data'),
           connect: plan != null || workspaces.length > 0,

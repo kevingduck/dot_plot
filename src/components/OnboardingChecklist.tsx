@@ -4,8 +4,6 @@ import { useEffect, useState } from 'react'
 // users → insights) and checks itself off from app state. Progress sticks
 // across reloads; the strip disappears once dismissed or complete.
 
-const STORE = 'dotchart:onboarding-v1'
-
 export interface OnboardingFlags {
   demo: boolean
   connect: boolean
@@ -18,9 +16,13 @@ interface Saved {
   done: Partial<OnboardingFlags>
 }
 
-function load(): Saved {
+// Keyed per account (email suffix) so a new login on the same browser gets
+// a fresh checklist instead of inheriting another account's progress
+const storeKey = (suffix?: string) => `dotchart:onboarding-v1${suffix ? `:${suffix}` : ''}`
+
+function load(key: string): Saved {
   try {
-    const raw = localStorage.getItem(STORE)
+    const raw = localStorage.getItem(key)
     if (raw) return JSON.parse(raw) as Saved
   } catch {
     /* fall through */
@@ -28,9 +30,9 @@ function load(): Saved {
   return { dismissed: false, done: {} }
 }
 
-function save(s: Saved) {
+function save(key: string, s: Saved) {
   try {
-    localStorage.setItem(STORE, JSON.stringify(s))
+    localStorage.setItem(key, JSON.stringify(s))
   } catch {
     /* private mode — checklist just won't persist */
   }
@@ -38,6 +40,7 @@ function save(s: Saved) {
 
 interface Props {
   flags: OnboardingFlags
+  storageSuffix?: string
   onDemo: () => void
   onConnect: () => void
   onHelp: (slug: string) => void
@@ -50,8 +53,15 @@ const STEPS: { key: keyof OnboardingFlags; label: string; hint: string }[] = [
   { key: 'insights', label: 'Find patterns', hint: '✨ in the Insights card, once real data is in' },
 ]
 
-export function OnboardingChecklist({ flags, onDemo, onConnect, onHelp }: Props) {
-  const [state, setState] = useState<Saved>(load)
+export function OnboardingChecklist({ flags, storageSuffix, onDemo, onConnect, onHelp }: Props) {
+  const key = storeKey(storageSuffix)
+  const [state, setState] = useState<Saved>(() => load(key))
+
+  // A different account logged in on this browser — reload its own progress
+  useEffect(() => {
+    setState(load(key))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
 
   // Once a step is done it stays done, even if the app state moves on
   useEffect(() => {
@@ -66,9 +76,10 @@ export function OnboardingChecklist({ flags, onDemo, onConnect, onHelp }: Props)
       }
       if (!changed) return prev
       const next = { ...prev, done }
-      save(next)
+      save(key, next)
       return next
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flags])
 
   if (state.dismissed || STEPS.every((s) => state.done[s.key])) return null
@@ -106,7 +117,7 @@ export function OnboardingChecklist({ flags, onDemo, onConnect, onHelp }: Props)
         title="Dismiss"
         onClick={() => {
           const next = { ...state, dismissed: true }
-          save(next)
+          save(key, next)
           setState(next)
         }}
       >

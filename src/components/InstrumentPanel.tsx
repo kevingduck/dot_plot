@@ -38,6 +38,9 @@ function Diff({ edit }: { edit: PreparedEdit }) {
   )
 }
 
+/** Hosted DotChart can only edit repos it cloned itself (GitHub connects). */
+const isServerRepo = (p: string) => /\/\.dotchart\/repos\//.test(p)
+
 export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '/ingest' }: Props) {
   const hosted = getAppMode().hosted
   const [phase, setPhase] = useState<Phase>('idle')
@@ -48,11 +51,13 @@ export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [includeSdk, setIncludeSdk] = useState(true)
   const [sdkOpen, setSdkOpen] = useState(false)
+  const [pushToken, setPushToken] = useState('')
   const [result, setResult] = useState<InstrumentResult | null>(null)
+  const canEditHere = !hosted || isServerRepo(path)
 
   const startedRef = useRef(false)
   useEffect(() => {
-    if (autoStart && !startedRef.current && phase === 'idle' && path.trim() && events.length > 0) {
+    if (autoStart && !startedRef.current && phase === 'idle' && path.trim() && events.length > 0 && canEditHere) {
       startedRef.current = true
       prepare()
     }
@@ -83,6 +88,7 @@ export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '
         path: path.trim(),
         sdkFile: includeSdk ? prep.sdk_file : undefined,
         edits: prep.edits.filter((e) => selected.has(e.id)),
+        pushToken: hosted ? pushToken.trim() : undefined,
       })
       setResult(r)
       setPhase('done')
@@ -99,13 +105,31 @@ export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '
     setSelected(next)
   }
 
-  if (hosted) {
+  if (hosted && !canEditHere) {
+    // The project came in via the browser folder picker — this server never
+    // had the files, so it can't write a branch. Be explicit about the ways
+    // that DO work.
     return (
       <div className="instrument-wrap">
         <p className="scan-hint" style={{ marginTop: 0 }}>
-          Code changes are applied from the <strong>local</strong> DotChart (it needs your git repo on disk): run{' '}
-          <code>npm run dev</code> on your machine, open this project there, and click Start tracking. Hosted mode keeps
-          collecting events, showing the grid, and finding insights.
+          <strong>This project was connected with the browser folder picker, so the server has no copy of the code to
+          edit.</strong>{' '}
+          Two ways to get the track() calls in:
+        </p>
+        <ol className="scan-hint instrument-options">
+          <li>
+            <strong>Reconnect via GitHub</strong> (recommended, if the repo is on GitHub): Connect project → "From
+            GitHub" tab. Then ⚡ Start tracking works right here — DotChart drafts the edits, you review each diff, and
+            the branch is pushed to GitHub for a normal pull-request review.
+          </li>
+          <li>
+            <strong>Add them by hand:</strong> every event's "Where" column below shows the exact file, function, and a
+            copy-paste <code>track()</code> snippet.
+          </li>
+        </ol>
+        <p className="scan-hint">
+          Either way, run the app with <code>DOTCHART_INGEST_URL={window.location.origin}{ingestPath}</code> set and
+          events appear on this grid within ~15 seconds.
         </p>
       </div>
     )
@@ -125,12 +149,26 @@ export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '
             {result.applied.length === 1 ? '' : 's'} across {result.filesChanged.length} file
             {result.filesChanged.length === 1 ? '' : 's'}. Three steps to live data:
           </p>
-          <div className="instrument-cmds">
-            <div className="stat-label">1 · Review &amp; merge the branch</div>
-            <pre className="instr-snippet">{`cd ${path}
+          {result.compareUrl ? (
+            <div className="instrument-cmds">
+              <div className="stat-label">1 · Review &amp; merge on GitHub</div>
+              <p className="scan-hint" style={{ margin: '4px 0' }}>
+                The branch is pushed.{' '}
+                <a href={result.compareUrl} target="_blank" rel="noreferrer">
+                  Open the pull request
+                </a>{' '}
+                to review every diff and merge — or close it to reject everything (your default branch is untouched
+                either way).
+              </p>
+            </div>
+          ) : (
+            <div className="instrument-cmds">
+              <div className="stat-label">1 · Review &amp; merge the branch</div>
+              <pre className="instr-snippet">{`cd ${path}
 git diff ${result.baseBranch}...${result.branch}   # look it over
 git merge ${result.branch}   # adopt (or open a PR) — or reject with: git branch -D ${result.branch}`}</pre>
-          </div>
+            </div>
+          )}
           <div className="instrument-cmds">
             <div className="stat-label">2 · Point your app at this DotChart</div>
             <pre className="instr-snippet">{`# server-side apps — set in the environment (.env), then restart:
@@ -209,10 +247,28 @@ DOTCHART_INGEST_URL=${ingestUrl}
               {prep.edits.some((e) => e.status !== 'ok') &&
                 ` (${prep.edits.filter((e) => e.status !== 'ok').length} couldn't be validated and are excluded)`}
             </span>
-            <button className="btn btn-primary" onClick={apply} disabled={selected.size === 0 && !includeSdk}>
-              Create branch with {selected.size + (includeSdk ? 1 : 0)} change{selected.size + (includeSdk ? 1 : 0) === 1 ? '' : 's'}
+            <button
+              className="btn btn-primary"
+              onClick={apply}
+              disabled={(selected.size === 0 && !includeSdk) || (hosted && !pushToken.trim())}
+              title={hosted && !pushToken.trim() ? 'Paste a GitHub token below first' : undefined}
+            >
+              {hosted ? 'Create branch & push to GitHub' : `Create branch with ${selected.size + (includeSdk ? 1 : 0)} change${selected.size + (includeSdk ? 1 : 0) === 1 ? '' : 's'}`}
             </button>
           </div>
+          {hosted && (
+            <div className="wizard-keyrow instrument-token">
+              <input
+                type="password"
+                className="scan-path"
+                placeholder="GitHub token with write access to this repo — used once for the push, never stored"
+                value={pushToken}
+                onChange={(e) => setPushToken(e.target.value)}
+                aria-label="GitHub push token"
+                autoComplete="off"
+              />
+            </div>
+          )}
           {prep.notes && <p className="scan-hint">Reviewer notes from Claude: {prep.notes}</p>}
 
           <div className="edit-item">

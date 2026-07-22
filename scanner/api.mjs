@@ -94,6 +94,19 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     res.end()
   }
 
+  /** In account mode the server's env API keys are reserved for the instance owner (first account). */
+  const allowEnvKeyFor = async (ctx) => {
+    if (!authMode) return true
+    if (!ctx?.user) return false
+    const { firstUserId } = await import('./auth.mjs')
+    return ctx.user.id === firstUserId()
+  }
+
+  const effectiveServerKeys = async (ctx) => {
+    const { serverKeys } = await import('./llm.mjs')
+    return (await allowEnvKeyFor(ctx)) ? serverKeys() : { anthropic: false, openai: false }
+  }
+
   /** Workspace dir for this request: the user's own in account mode, legacy otherwise. */
   const projectsDirOf = async (ctx) => {
     if (!authMode || !ctx?.user) return undefined // module default (legacy shared dir)
@@ -103,15 +116,15 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
 
   const routes = {
     '/api/mode': json(async (_body, ctx) => {
-      const { hasServerKey, serverKeys } = await import('./llm.mjs')
+      const keys = await effectiveServerKeys(ctx)
       return {
         hosted,
         authRequired: Boolean(password) && !authMode,
         authMode,
         user: ctx?.user ? { email: ctx.user.email } : null,
         githubOauth: authMode && Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
-        hasServerKey: hasServerKey(),
-        serverKeys: serverKeys(),
+        hasServerKey: keys.anthropic,
+        serverKeys: keys,
       }
     }),
 
@@ -134,9 +147,9 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       return { ok: true, _setCookie: clearSessionCookie() }
     }),
 
-    '/api/keycheck': json(async () => {
-      const { hasServerKey, serverKeys } = await import('./llm.mjs')
-      return { hasServerKey: hasServerKey(), serverKeys: serverKeys() }
+    '/api/keycheck': json(async (_body, ctx) => {
+      const keys = await effectiveServerKeys(ctx)
+      return { hasServerKey: keys.anthropic, serverKeys: keys }
     }),
 
     // Validate a provider config without a paid call: key check for
@@ -214,10 +227,10 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       return discoverProject(body.path)
     }),
 
-    '/api/connect/analyze': ndjson(async (body, onStatus) => {
+    '/api/connect/analyze': ndjson(async (body, onStatus, ctx) => {
       const { analyzeProject } = await import('./connect.mjs')
       const { path: targetPath, connectionString, model, apiKey, provider, baseUrl, digest } = body
-      const aiOpts = { onStatus, model, apiKey, provider, baseUrl }
+      const aiOpts = { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: await allowEnvKeyFor(ctx) }
       if (digest) {
         // Browser-side digest (hosted local-folder flow)
         if (!digest.name || typeof digest.digest !== 'string' || !digest.digest) {
@@ -230,23 +243,34 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       return analyzeProject(targetPath, connectionString || undefined, aiOpts)
     }),
 
-    '/api/instrument/prepare': ndjson(async (body, onStatus) => {
+    '/api/instrument/prepare': ndjson(async (body, onStatus, ctx) => {
       const { path: targetPath, events, model, apiKey, provider, baseUrl } = body
       if (!targetPath || !Array.isArray(events) || events.length === 0) {
         throw new Error('Body must be {"path": "...", "events": [...accepted plan events]}')
       }
       assertHostedPathAllowed(hosted, targetPath)
       const { prepareInstrumentation } = await import('./instrument.mjs')
-      const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey, provider, baseUrl })
+      const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: await allowEnvKeyFor(ctx) })
       onStatus(`Prepared ${prep.edits.length} edits (${prep.edits.filter((e) => e.status === 'ok').length} clean)`)
       return prep
     }),
 
     '/api/instrument/apply': json(async (body) => {
-      if (hosted) throw new Error('Applying branches is a local-mode feature — use Export accepted plan + the local app, or GitHub push (coming)')
-      const { path: targetPath, sdkFile, edits } = body
+      const { path: targetPath, sdkFile, edits, pushToken } = body
       if (!targetPath || !Array.isArray(edits)) throw new Error('Body must be {"path", "sdkFile", "edits"}')
-      const { applyInstrumentation } = await import('./instrument.mjs')
+      const { applyInstrumentation, pushBranch } = await import('./instrument.mjs')
+      if (hosted) {
+        // Hosted CAN create branches for GitHub-connected projects: the clone
+        // lives on this server; the branch is pushed with a one-time token.
+        assertHostedPathAllowed(hosted, targetPath)
+        if (!pushToken) {
+          throw new Error('A GitHub token with write access to the repo is needed to push the branch (used once, never stored)')
+        }
+        const result = applyInstrumentation(targetPath, { sdkFile, edits })
+        const { compareUrl } = pushBranch(targetPath, result.branch, result.baseBranch, pushToken)
+        log(`Instrumentation branch ${result.branch} pushed to GitHub (${result.applied.length} edits)`)
+        return { ...result, pushed: true, compareUrl }
+      }
       const result = applyInstrumentation(targetPath, { sdkFile, edits })
       log(`Instrumentation branch ${result.branch} created (${result.applied.length} edits, base ${result.baseBranch})`)
       return result
@@ -292,10 +316,10 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       return { ok: true }
     }),
 
-    '/api/insights': json(async (body) => {
+    '/api/insights': json(async (body, ctx) => {
       if (!body.summary) throw new Error('Body must include a usage summary')
       const { findInsights } = await import('./insights.mjs')
-      const out = await findInsights(body.summary, { model: body.model, apiKey: body.apiKey, provider: body.provider, baseUrl: body.baseUrl })
+      const out = await findInsights(body.summary, { model: body.model, apiKey: body.apiKey, provider: body.provider, baseUrl: body.baseUrl, allowEnvKey: await allowEnvKeyFor(ctx) })
       log(`insights: ${out.insights.length} found (${out.meta.usage.input_tokens} in / ${out.meta.usage.output_tokens} out tokens)`)
       return out
     }),
@@ -343,12 +367,12 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       return { ok: true }
     }),
 
-    '/api/scan': ndjson(async (body, onStatus) => {
+    '/api/scan': ndjson(async (body, onStatus, ctx) => {
       const { path: targetPath, model, apiKey, provider, baseUrl } = body
       if (!targetPath || typeof targetPath !== 'string') throw new Error('Body must be {"path": "/path/to/codebase"}')
       assertHostedPathAllowed(hosted, targetPath)
       const { scanCodebase } = await import('./scan.mjs')
-      return scanCodebase(targetPath, { model, apiKey, provider, baseUrl, onStatus })
+      return scanCodebase(targetPath, { model, apiKey, provider, baseUrl, onStatus, allowEnvKey: await allowEnvKeyFor(ctx) })
     }),
   }
 

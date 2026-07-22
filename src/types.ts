@@ -120,6 +120,9 @@ export interface InstrumentResult {
   applied: PreparedEdit[]
   skipped: (PreparedEdit & { reason: string })[]
   filesChanged: string[]
+  // Hosted GitHub flow: branch was pushed to the origin for PR review
+  pushed?: boolean
+  compareUrl?: string
 }
 
 export interface DbSyncConfig {
