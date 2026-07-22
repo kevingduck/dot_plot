@@ -11,22 +11,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-import Anthropic from '@anthropic-ai/sdk'
-import { ALLOWED_MODELS, DEFAULT_MODEL, buildDigest, extractTrackedKeys, reconcilePlanWithExistingKeys } from './scan.mjs'
+import { buildDigest, extractTrackedKeys, reconcilePlanWithExistingKeys } from './scan.mjs'
+import { aiLabel, resolveAi, runStructured } from './llm.mjs'
 import { scanDatabase } from './dbscan.mjs'
-
-function loadEnvKey() {
-  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY
-  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  try {
-    const m = fs.readFileSync(path.join(projectRoot, '.env'), 'utf8').match(/^ANTHROPIC_API_KEY=(.+)$/m)
-    if (m) return m[1].trim()
-  } catch {
-    /* no .env */
-  }
-  return null
-}
 
 const PROJECT_MARKERS = ['package.json', 'pyproject.toml', 'go.mod', 'Gemfile', 'Cargo.toml', 'composer.json', '.git']
 
@@ -238,10 +225,13 @@ Principles:
 - Always also provide instrumentation points (real files/functions from the code, with a one-line dotchart.track(userId, 'key', props) snippet) — even db-backed events benefit from live tracking later.
 - The instrumentation snippets must reference real code locations from the provided files.`
 
-export async function analyzeProject(targetPath, connectionString, { onStatus = () => {}, model, apiKey: userKey, prebuilt } = {}) {
-  const MODEL = ALLOWED_MODELS.includes(model) ? model : DEFAULT_MODEL
-  const apiKey = userKey || loadEnvKey()
-  if (!apiKey) throw new Error('No API key — add yours in Settings, or put ANTHROPIC_API_KEY in the project .env')
+/**
+ * Assemble everything the LLM call needs (prompt, schema) plus the context
+ * required to post-process its answer. Split out so the call itself can run
+ * either server-side (runStructured) or in the user's browser (local Ollama
+ * against a hosted DotChart) — see /api/ai/prepare + /api/ai/finish.
+ */
+export async function buildAnalysisRequest(targetPath, connectionString, { onStatus = () => {}, prebuilt } = {}) {
   const root = prebuilt ? `local:${prebuilt.name}` : path.resolve(targetPath)
 
   let digest, included, skipped, trackedKeys
@@ -283,39 +273,38 @@ export async function analyzeProject(targetPath, connectionString, { onStatus = 
     : ''
   if (existingKeys.length) onStatus(`Found ${existingKeys.length} existing tracking calls — keeping their exact event keys`)
 
-  onStatus(`Asking ${MODEL} to analyze the product…`)
-  const client = new Anthropic({ apiKey })
-  const stream = client.messages.stream({
-    model: MODEL,
-    max_tokens: 32000,
-    thinking: { type: 'adaptive' },
-    system: CONNECT_SYSTEM,
-    output_config: { format: { type: 'json_schema', schema: CONNECT_SCHEMA } },
-    messages: [{ role: 'user', content: `Analyze this product and propose its analytics event plan.${existingNote}${schemaBlock}\n\nCODEBASE:\n\n${digest}` }],
-  })
-  let drafted = 0
-  stream.on('text', (_, snapshot) => {
-    const n = (snapshot.match(/"key"\s*:/g) || []).length
-    if (n > drafted) {
-      drafted = n
-      onStatus(`Drafting the event plan — ${n} event${n === 1 ? '' : 's'}…`)
-    }
-  })
-  const message = await stream.finalMessage()
-  if (message.stop_reason === 'refusal') throw new Error('Model declined the request')
-  if (message.stop_reason === 'max_tokens') throw new Error('Response truncated — try a smaller codebase')
-  const plan = JSON.parse(message.content.filter((b) => b.type === 'text').map((b) => b.text).join(''))
+  return {
+    request: {
+      system: CONNECT_SYSTEM,
+      prompt: `Analyze this product and propose its analytics event plan.${existingNote}${schemaBlock}\n\nCODEBASE:\n\n${digest}`,
+      schema: CONNECT_SCHEMA,
+      maxTokens: 32000,
+    },
+    ctx: {
+      root,
+      included,
+      skipped,
+      existingKeys,
+      db_connected: Boolean(schema),
+      knownTables: (schema?.tables ?? []).map((t) => ({ table: t.table, columns: t.columns })),
+    },
+  }
+}
+
+/** Post-process a raw plan from any provider into the final, trustworthy one. */
+export function finishAnalysis(plan, ctx, { model, provider, usage, onStatus = () => {} } = {}) {
+  if (!plan || !Array.isArray(plan.events)) throw new Error('The model did not return an event plan')
 
   // Validate db mappings against the real schema; downgrade invalid ones to
   // instrumentation-only so the import step can trust every mapping blindly.
-  const known = new Map((schema?.tables ?? []).map((t) => [t.table, new Set(t.columns)]))
+  const known = new Map((ctx.knownTables ?? []).map((t) => [t.table, new Set(t.columns)]))
   for (const e of plan.events) {
     const m = e.db_mapping
     const valid =
       m && m.table && known.has(m.table) && known.get(m.table).has(m.user_column) && known.get(m.table).has(m.timestamp_column)
     if (!valid) e.db_mapping = { table: '', user_column: '', timestamp_column: '' }
   }
-  const { renamed, added } = reconcilePlanWithExistingKeys(plan, existingKeys, { withDbMapping: true })
+  const { renamed, added } = reconcilePlanWithExistingKeys(plan, ctx.existingKeys ?? [], { withDbMapping: true })
   if (renamed.length) onStatus(`Aligned ${renamed.length} event key${renamed.length === 1 ? '' : 's'} with existing instrumentation (${renamed.join('; ')})`)
   if (added.length) onStatus(`Added ${added.length} already-instrumented event${added.length === 1 ? '' : 's'} the analysis missed (${added.join(', ')})`)
   const dbBacked = plan.events.filter((e) => e.db_mapping.table).length
@@ -324,13 +313,34 @@ export async function analyzeProject(targetPath, connectionString, { onStatus = 
   return {
     ...plan,
     meta: {
-      scanned_path: root,
-      files_included: included,
-      files_skipped: skipped,
-      model: MODEL,
+      scanned_path: ctx.root,
+      files_included: ctx.included,
+      files_skipped: ctx.skipped,
+      model,
+      provider,
       generated_at: new Date().toISOString(),
-      db_connected: Boolean(schema),
-      usage: { input_tokens: message.usage.input_tokens, output_tokens: message.usage.output_tokens },
+      db_connected: ctx.db_connected,
+      usage,
     },
   }
+}
+
+export async function analyzeProject(targetPath, connectionString, { onStatus = () => {}, model, apiKey, provider, baseUrl, prebuilt } = {}) {
+  const ai = resolveAi({ provider, model, apiKey, baseUrl })
+  const { request, ctx } = await buildAnalysisRequest(targetPath, connectionString, { onStatus, prebuilt })
+
+  onStatus(`Asking ${aiLabel(ai)} to analyze the product…`)
+  let drafted = 0
+  const { object: plan, usage } = await runStructured(ai, {
+    ...request,
+    onStatus,
+    onText: (snapshot) => {
+      const n = (snapshot.match(/"key"\s*:/g) || []).length
+      if (n > drafted) {
+        drafted = n
+        onStatus(`Drafting the event plan — ${n} event${n === 1 ? '' : 's'}…`)
+      }
+    },
+  })
+  return finishAnalysis(plan, ctx, { model: ai.model, provider: ai.provider, usage, onStatus })
 }

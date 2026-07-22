@@ -1,157 +1,141 @@
 # DotChart
 
-See what your users are actually doing — a dot-plot-first product analytics tool.
+**See what your users are actually doing.** A dot-plot-first product analytics
+tool with an AI scanner that reads your codebase, proposes the events worth
+tracking, and writes the instrumentation for you — on a git branch, with your
+review.
 
-Inspired by David Lieb's "dot plot" technique (Bump, Google Photos): a 2D grid
-where **every row is one user and every column is one day**, so individual usage
-patterns — weekday-vs-weekend clusters, one-and-done churners, feature-triggered
-streaks, fading accounts — are visible in a way no aggregate DAU chart can show.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img alt="DotChart — one row per user, one column per day" src="docs/screenshot-light.png">
+</picture>
 
-## Run it
+## Why a dot plot?
 
-**Local (full features):**
+Aggregate dashboards hide your users. A DAU line can stay flat while your best
+customer quietly churns. DotChart uses the technique David Lieb (Bump, Google
+Photos) credits for saving his products: a 2D grid where **every row is one
+user and every column is one day** — so weekday-vs-weekend clusters,
+one-and-done churners, feature-triggered streaks, and fading accounts are
+*visible*, the way no aggregate chart can show them.
 
-```sh
-npm install
-npm run dev          # UI + API on :5173/:5199 — filesystem, git, local DBs all enabled
-```
+The hard part of analytics was never the chart — it's knowing **what to
+track** and actually wiring it up. That's the part DotChart automates.
 
-**Hosted (Render or any Node host):** deploy with `render.yaml` (Blueprint), or:
-
-```sh
-npm run build
-DOTCHART_HOSTED=1 DOTCHART_PASSWORD=… ANTHROPIC_API_KEY=… npm start
-```
-
-Hosted mode gives you an always-on ingest URL (`https://your-app/…/ingest`) and
-a dashboard reachable from anywhere, protected by the password (only `/ingest`
-and `/health` stay open — ingest is validated and capped by design). Connect
-works via the GitHub tab or the **browser folder picker**: your browser reads
-the picked folder locally and uploads only the filtered code digest — the
-project never leaves your machine. Machine-local features (server-side folder
-browsing, applying git branches, localhost databases) remain local-mode-only.
-
-Opens with a generated sample dataset (a fictional music app: plays, playlists,
-shares, searches) so the visualization is immediately explorable.
-
-## Connect your project (the main flow)
-
-First run opens the **Connect wizard**: pick your project in a folder browser
-(projects are badged automatically) or paste a GitHub URL — private repos work
-via your local git credentials or a one-time access token, never stored. From
-there DotChart does the rest — detects the project and framework, finds the database connection in the
-repo's env files (used read-only, with your consent, never leaving your
-machine), and runs one Claude analysis over the code *and* the live schema.
-You get a single review screen where every proposed event is labeled either
-**"already in your database"** (imports immediately — zero code changes) or
-**"needs a one-line code change"** (goes on a git branch via the
-instrumentation flow). One click — *Show me my users* — and the grid shows
-your real users with the plan's labels. Data and plan persist across reloads.
-
-## Scan a codebase for events (advanced / à la carte)
-
-The differentiating piece: point DotChart at a repo and Claude proposes the
-analytics events worth tracking — a ranked plan of value/activation/feature
-events with concrete instrumentation points, reviewed and edited in the UI.
-
-AI analysis runs on **Claude Sonnet 5** by default (near-Opus quality on code
-analysis at ~40% of the cost); switch to Opus 4.8 for gnarly codebases — or add
-your own API key — under **⚙ Settings**. Each plan shows its actual cost.
+## Quickstart
 
 ```sh
-# 1. Provide an Anthropic API key — either in ⚙ Settings in the UI, or:
-echo 'ANTHROPIC_API_KEY=sk-ant-…' > .env
-
-# 2a. From the UI: "Scan codebase" button → enter a path → review the plan
-# 2b. Or from the CLI:
-npm run scan -- /path/to/your/codebase   # writes dotchart.events.json
+npx dotchart-analytics
 ```
 
-The scanner (`scanner/scan.mjs`) walks the repo
-(routes/handlers/components first, ~400KB budget), asks Claude for a structured
-event plan, and returns: a product summary, one **core value event**, and 4–10
-events tiered core/activation/feature/noise — each with rationale, confidence,
-and copyable `dotchart.track(...)` snippets pointing at real files and
-functions. In the review panel you accept/reject events, reassign the core
-event, and export the accepted plan (`dotchart.events.json`) — the contract the
-phase-2 SDK will consume.
+Starts on a free port, opens your browser, and lands you in the Connect
+wizard. All data stays in `~/.dotchart` on your machine. (Or clone and
+`npm install && npm run dev`.)
 
-## Instrument a codebase — on a branch, with review
+## How it works — from zero to tracked in four steps
 
-From an accepted plan, **Instrument codebase…** turns the events into real
-tracking code without ever touching your working branch:
+1. **Connect your project.** Pick a folder (or paste a GitHub URL — private
+   repos work via a one-time token, never stored). DotChart detects the
+   framework, finds the database connection in the repo's env files (used
+   **read-only**, with your consent), and runs one AI pass over the code and
+   the live schema.
+2. **Review the proposed event plan.** A ranked plan of value / activation /
+   feature events — you accept, reject, or re-tier each one. Every event is
+   labeled either **"already in your database · table"** or **"needs a
+   one-line code change"**.
+3. **See your users.** *Show me my users* charts the database-backed events
+   immediately — zero code changes. For the rest, **⚡ Start tracking**
+   drafts minimal `track()` edits, shows you every diff, and commits only
+   what you approve to a fresh `dotchart/*` branch (your working tree is
+   never touched; it refuses dirty trees). Merge the branch, set one env var
+   — `DOTCHART_INGEST_URL` — and events flow onto the grid within ~15
+   seconds. Until that var is set the merged code is a guaranteed no-op.
+4. **Find patterns.** ✨ asks the AI to do the PayPal-fraud-wall job: churn
+   risks, activation hypotheses, users worth interviewing — each insight
+   clickable to highlight those users on the grid.
 
-1. **Propose** — Claude drafts minimal, additive edits (a `track()` call at
-   each success point, an import per file, and a tiny `dotchart.js`/`.ts`
-   client that is a no-op until `DOTCHART_INGEST_URL` is set). Every edit is
-   validated against the file on disk before you see it.
-2. **Review** — each edit is a diff with a checkbox; reject anything.
-3. **Apply** — approved edits are committed to a new `dotchart/…` git branch
-   and your original branch/working tree are left exactly as they were.
-   Refuses to run on a dirty tree. Review with `git diff main...dotchart/…`,
-   merge it, or delete the branch to reject everything.
+Every step shows its state honestly: each planned event reads
+**● reporting data**, **◐ in your database**, or **○ no events yet**, so you
+always know what's actually wired up.
 
-## Import from a database — read-only
+## Bring your own AI
 
-Paste a Postgres connection string ("Scan codebase" → database section): the
-schema is introspected over a session with `default_transaction_read_only=on`
-(Postgres itself rejects any write), tables that look like event streams
-(user column + timestamp column, snake_case or camelCase) are suggested as
-mappings, and only the tables you approve are imported — your existing data
-becomes dots with zero code changes. The connection string is used by the
-local dev server and never stored.
+- **Claude** (default, recommended) — Sonnet 5, or Opus 4.8 for gnarly
+  codebases.
+- **OpenAI** — GPT-5.6 Terra/Luna, or type any model id.
+- **Local & free via [Ollama](https://ollama.com)** — no key, no cost,
+  nothing sent to a cloud AI. Works even against a *hosted* DotChart: the
+  browser calls your local Ollama directly.
+
+The wizard's one-time "Choose your AI" step auto-detects a running Ollama;
+keys live only in your browser (or in the server's env for teams). Every
+analysis reports its actual cost — typically a few tens of cents on cloud
+models, free locally.
 
 ## What's in the grid
 
-- One row per user, one column per day; weekends shaded.
-- The **symbol** in a cell is the day's *rarest* event — so low-frequency,
-  high-signal moments (created a playlist) stay visible on days the core event
-  also happened. Mark size steps up with event volume, and **mini dots** under
-  the mark show the other event types that also happened that day.
-- A **ring** marks each user's first day (onboarding).
-- Sort rows by signup date, active days, recency, or longest streak; filter by
-  date range (presets or a custom from/to), platform, plan, or user search;
-  toggle event types in the legend.
-- Hover any cell for per-event counts; arrow keys navigate; click a row for the
-  full per-user event log, attributes, and streak stats.
-- **Cohort retention** curves (weekly signup cohorts, weeks fully elapsed only)
-  ride below the grid, scoped to the same filters.
+- The **symbol** in a cell is the day's *rarest* event, so high-signal
+  moments (created a playlist) stay visible on days the core event also
+  happened; mark size steps with volume, mini-dots show the day's other
+  events, and a **ring** marks each user's first day.
+- Sort by signup date, active days, recency, or streak; filter by date
+  range, platform, plan, or search; click a row for the full per-user log.
+- **Cohort retention** curves ride below the grid — only weeks a cohort has
+  fully lived through are charted, so partial tails can't fake a spike.
 
-## Bring your own data
+## More ways in
 
-`Import CSV` accepts:
+- **CSV import/export** — `user_id,event,timestamp[,name,platform,plan,country]`
+  and the grid lights up; no code, no database.
+- **Read-only Postgres import** — the session runs with
+  `default_transaction_read_only=on` (Postgres itself rejects writes); you
+  approve every table mapping, and **↻ Refresh** re-imports on demand.
+- **Ingest API** — `POST /ingest` on the app's own origin: CORS-open,
+  batched, validated, capped. Anything that can send JSON can be charted.
+- **Per-project workspaces** — every connected project's data, plan, and
+  insights autosave and switch instantly from the Projects menu.
 
-```csv
-user_id,event,timestamp[,name,platform,plan,country]
-u_001,processed_invoice,2026-07-01T14:03:22Z,Ada L.,Web,Pro,US
+## Self-hosting
+
+An always-on dashboard plus a stable ingest URL for production apps:
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/kevingduck/dot_plot)
+
+```sh
+# Docker
+docker build -t dotchart . && docker run -p 5300:5300 \
+  -v dotchart-data:/root/.dotchart -e DOTCHART_HOSTED=1 \
+  -e DOTCHART_PASSWORD=changeme dotchart
+
+# or any Node host
+npm ci && npm run build
+DOTCHART_HOSTED=1 DOTCHART_PASSWORD=… npm start
 ```
 
-Timestamps may be ISO 8601 or epoch seconds/ms. Event types are ranked by
-frequency: the top 4 get a slot + shape (the most frequent is treated as the
-core event), the rest fold into "Other". `Export CSV` round-trips the current
-dataset, sample data included — handy as a format reference.
+Set `DOTCHART_PASSWORD` on any public deployment — everything except
+`/ingest` and `/health` locks behind it. Optional `ANTHROPIC_API_KEY` /
+`OPENAI_API_KEY` give the team shared AI; otherwise users bring their own
+key (or their own Ollama) in Settings. Hosted mode keeps machine-local
+features (server-side folder browsing, git branches, localhost databases)
+disabled; connect via GitHub or the browser folder picker, which uploads
+only a filtered code digest.
 
-## Live tracking (the closed loop)
+## Documentation
 
-The generated SDK posts to `POST /ingest` (CORS-open, batched, validated).
-Set `DOTCHART_INGEST_URL=http://localhost:5199/ingest` in the instrumented
-app's environment and every tracked action lands in `~/.dotchart/events.jsonl`
-and appears on the grid within ~15 seconds — a "● N live" chip shows the feed.
-Database-connected datasets get a **↻ Refresh** button that re-imports
-(read-only) with the saved mappings.
-
-## Insights
-
-**✨ Find patterns** sends a compact per-user usage summary to Claude, which
-does the PayPal-fraud-wall job: 3–5 ranked, concrete observations (churn risks,
-activation hypotheses, streaks worth a customer interview, cadence clusters),
-each clickable to highlight the users it's about on the grid. Costs a few
-cents on the default model.
+In-app via the **?** button (same pages, works hosted), or in
+[`docs/`](docs/): [getting started](docs/getting-started.md) ·
+[connect your project](docs/connect-your-project.md) ·
+[reading the grid](docs/reading-the-grid.md) ·
+[AI providers & models](docs/api-keys-and-models.md) ·
+[instrumentation](docs/instrumenting-your-code.md) ·
+[live tracking](docs/live-tracking.md) · [CSV import](docs/csv-import.md) ·
+[self-hosting](docs/self-hosting.md) ·
+[troubleshooting](docs/troubleshooting.md)
 
 ## Roadmap
 
-1. ✅ Dot plot viewer · 2. ✅ AI codebase scanner + plan review · 3. ✅
-Branch-based instrumentation · 4. ✅ Read-only DB import + refresh · 5. ✅
-Connect wizard (folder picker / GitHub) · 6. ✅ Ingest endpoint + live grid ·
-7. ✅ AI insight cards. Next: `npx dotchart` packaging, Segment/PostHog
-adapters, B2B accounts view, alerting.
+✅ Dot-plot viewer · ✅ AI codebase scanner + plan review · ✅ Branch-based
+instrumentation · ✅ Read-only DB import + refresh · ✅ Connect wizard ·
+✅ Live ingest · ✅ AI insights · ✅ Hosted mode · ✅ Multi-provider AI
+(Claude / OpenAI / Ollama). Next: SQLite store, Python `track()` client,
+Segment/PostHog adapters, B2B accounts view, alerting.

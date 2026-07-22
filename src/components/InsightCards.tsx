@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { Dataset, GridModel } from '../types'
 import { postJson } from '../lib/api'
-import { aiParams, estimateCost } from '../lib/settings'
+import { aiParams, costLabel } from '../lib/settings'
+import { browserOllamaActive, runBrowserOllamaTask } from '../lib/ai'
 import { buildUsageSummary, type Insight } from '../lib/insights'
 
 const KIND_LABEL: Record<Insight['kind'], string> = {
@@ -13,7 +14,7 @@ const KIND_LABEL: Record<Insight['kind'], string> = {
 
 export interface InsightsResponse {
   insights: Insight[]
-  meta: { model: string; usage: { input_tokens: number; output_tokens: number } }
+  meta: { model: string; provider?: string; usage: { input_tokens: number; output_tokens: number } }
 }
 
 interface Props {
@@ -38,7 +39,9 @@ export function InsightCards({ model, dataset, saved, onSaved, onHighlight }: Pr
     onHighlight(null)
     try {
       const summary = buildUsageSummary(model, dataset)
-      const r = await postJson<InsightsResponse>('/api/insights', { summary, ...aiParams() })
+      const r = browserOllamaActive()
+        ? await runBrowserOllamaTask<InsightsResponse>('insights', { summary }, () => {})
+        : await postJson<InsightsResponse>('/api/insights', { summary, ...aiParams() })
       setResult(r)
       onSaved(r)
     } catch (err) {
@@ -68,8 +71,8 @@ export function InsightCards({ model, dataset, saved, onSaved, onHighlight }: Pr
           <h2>Insights</h2>
           <p className="card-sub">
             {result
-              ? `Found by ${result.meta.model} (~${estimateCost(result.meta.model, result.meta.usage) ?? '?'}) — click a card to highlight those users on the grid`
-              : 'Let Claude stare at the grid for you — churn risks, activation patterns, users worth talking to.'}
+              ? `Found by ${result.meta.model} (${costLabel(result.meta) ?? '?'}) — click a card to highlight those users on the grid`
+              : 'Let AI stare at the grid for you — churn risks, activation patterns, users worth talking to.'}
           </p>
         </div>
         <div className="plan-actions">

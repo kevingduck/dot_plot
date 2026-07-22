@@ -13,24 +13,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-import Anthropic from '@anthropic-ai/sdk'
-import { ALLOWED_MODELS, DEFAULT_MODEL } from './scan.mjs'
+import { aiLabel, resolveAi, runStructured } from './llm.mjs'
 
 function git(repo, args, opts = {}) {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', ...opts }).trim()
-}
-
-function loadEnvKey() {
-  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY
-  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-  try {
-    const m = fs.readFileSync(path.join(projectRoot, '.env'), 'utf8').match(/^ANTHROPIC_API_KEY=(.+)$/m)
-    if (m) return m[1].trim()
-  } catch {
-    /* no .env */
-  }
-  return null
 }
 
 function sdkTemplate(isTs, isCjs) {
@@ -144,10 +130,8 @@ Hard rules:
  * Stage 1 — propose edits. Read-only: returns {sdk_file, edits[], notes};
  * each edit pre-validated with status 'ok' | 'no_match' | 'ambiguous'.
  */
-export async function prepareInstrumentation(targetPath, events, { onStatus = () => {}, model, apiKey: userKey } = {}) {
-  const MODEL = ALLOWED_MODELS.includes(model) ? model : DEFAULT_MODEL
-  const apiKey = userKey || loadEnvKey()
-  if (!apiKey) throw new Error('No API key — add yours in Settings, or put ANTHROPIC_API_KEY in the project .env')
+export async function prepareInstrumentation(targetPath, events, { onStatus = () => {}, model, apiKey, provider, baseUrl } = {}) {
+  const ai = resolveAi({ provider, model, apiKey, baseUrl })
   const root = path.resolve(targetPath)
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) throw new Error(`Not a directory: ${root}`)
 
@@ -192,27 +176,23 @@ Files:
 
 ${fileBlobs}`
 
-  onStatus(`Asking ${MODEL} to draft the edits…`)
-  const client = new Anthropic({ apiKey })
-  const stream = client.messages.stream({
-    model: MODEL,
-    max_tokens: 32000,
-    thinking: { type: 'adaptive' },
-    system: INSTRUMENT_SYSTEM,
-    output_config: { format: { type: 'json_schema', schema: EDITS_SCHEMA } },
-    messages: [{ role: 'user', content: userPrompt }],
-  })
+  onStatus(`Asking ${aiLabel(ai)} to draft the edits…`)
   let drafted = 0
-  stream.on('text', (_, snapshot) => {
-    const n = (snapshot.match(/"old_string"/g) || []).length
-    if (n > drafted) {
-      drafted = n
-      onStatus(`Drafting edits — ${n} so far…`)
-    }
+  const { object: raw, usage } = await runStructured(ai, {
+    system: INSTRUMENT_SYSTEM,
+    prompt: userPrompt,
+    schema: EDITS_SCHEMA,
+    maxTokens: 32000,
+    onStatus,
+    onText: (snapshot) => {
+      const n = (snapshot.match(/"old_string"/g) || []).length
+      if (n > drafted) {
+        drafted = n
+        onStatus(`Drafting edits — ${n} so far…`)
+      }
+    },
   })
-  const message = await stream.finalMessage()
-  if (message.stop_reason === 'refusal') throw new Error('Model declined the request')
-  const raw = JSON.parse(message.content.filter((b) => b.type === 'text').map((b) => b.text).join(''))
+  if (!raw || !Array.isArray(raw.edits)) throw new Error('The model did not return edits')
 
   // Pre-validate every edit against the file on disk
   const fileCache = new Map(wanted.map((f) => [f.rel, f.content]))
@@ -253,8 +233,9 @@ ${fileBlobs}`
       .join(' '),
     meta: {
       target: root,
-      model: MODEL,
-      usage: { input_tokens: message.usage.input_tokens, output_tokens: message.usage.output_tokens },
+      model: ai.model,
+      provider: ai.provider,
+      usage,
     },
   }
 }

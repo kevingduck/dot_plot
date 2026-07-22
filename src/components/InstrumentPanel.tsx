@@ -111,6 +111,9 @@ export function InstrumentPanel({ defaultPath, events, autoStart }: Props) {
   }
 
   if (phase === 'done' && result) {
+    // Ingest is served by THIS app, whatever origin it runs on — dev server,
+    // npx, or a hosted deployment. Never hardcode a port here.
+    const ingestUrl = `${window.location.origin}/ingest`
     return (
       <div className="instrument-wrap">
         <div className="instrument-done">
@@ -119,32 +122,43 @@ export function InstrumentPanel({ defaultPath, events, autoStart }: Props) {
             <code>{result.branch}</code> (commit <code>{result.commit}</code>) now sits alongside{' '}
             <code>{result.baseBranch}</code> with {result.applied.length} tracking edit
             {result.applied.length === 1 ? '' : 's'} across {result.filesChanged.length} file
-            {result.filesChanged.length === 1 ? '' : 's'}.
+            {result.filesChanged.length === 1 ? '' : 's'}. Three steps to live data:
           </p>
           <div className="instrument-cmds">
-            <div className="stat-label">Review it</div>
-            <pre className="instr-snippet">{`cd ${path}\ngit diff ${result.baseBranch}...${result.branch}`}</pre>
-            <div className="stat-label">Adopt it</div>
-            <pre className="instr-snippet">{`git merge ${result.branch}   # or open a PR from the branch`}</pre>
-            <div className="stat-label">Reject it entirely</div>
-            <pre className="instr-snippet">{`git branch -D ${result.branch}`}</pre>
+            <div className="stat-label">1 · Review &amp; merge the branch</div>
+            <pre className="instr-snippet">{`cd ${path}
+git diff ${result.baseBranch}...${result.branch}   # look it over
+git merge ${result.branch}   # adopt (or open a PR) — or reject with: git branch -D ${result.branch}`}</pre>
           </div>
           <div className="instrument-cmds">
-            <div className="stat-label">Turn it on (after merging)</div>
+            <div className="stat-label">2 · Point your app at this DotChart</div>
             <pre className="instr-snippet">{`# server-side apps — set in the environment (.env), then restart:
-DOTCHART_INGEST_URL=http://localhost:5199/ingest
+DOTCHART_INGEST_URL=${ingestUrl}
 
 # static pages / browser-only apps — env vars never reach the browser;
 # add one line to the HTML instead, before the app's scripts:
-<script>window.DOTCHART_INGEST_URL = 'http://localhost:5199/ingest'</script>`}</pre>
+<script>window.DOTCHART_INGEST_URL = '${ingestUrl}'</script>`}</pre>
+            <p className="scan-hint">
+              Until that URL is set the merged code is inert — it changes nothing at runtime, so merging is always
+              safe.
+              {ingestUrl.includes('localhost') && (
+                <>
+                  {' '}
+                  <code>{ingestUrl}</code> works for apps running on this machine. For a <em>deployed</em> app, point it
+                  at a DotChart the internet can reach — the same app self-hosted (see Help → Self-hosting), or a
+                  tunnel to this machine.
+                </>
+              )}
+            </p>
           </div>
-          <p className="scan-hint">
-            Until that URL is set the instrumentation is inert — merged as-is, it changes nothing at runtime. With it
-            set, every tracked action lands here and appears on the grid within ~15 seconds, no reload needed. Deployed
-            somewhere public (Render, Vercel, …)? <code>localhost</code> isn't reachable from the internet — run{' '}
-            <code>npm run ingest</code> plus a tunnel (e.g. <code>ngrok http 5299</code>) and use the tunnel URL +{' '}
-            <code>/ingest</code> instead.
-          </p>
+          <div className="instrument-cmds">
+            <div className="stat-label">3 · Use your app — that's it</div>
+            <p className="scan-hint" style={{ margin: 0 }}>
+              Every tracked action lands here within ~15 seconds, no reload needed: the status bar shows{' '}
+              <strong>● N tracked events</strong>, and each event in the plan flips from "○ no events yet" to{' '}
+              <strong>● reporting data</strong>.
+            </p>
+          </div>
           {result.skipped.length > 0 && (
             <p className="scan-hint">Skipped (didn't apply cleanly): {result.skipped.map((s) => `${s.file} (${s.reason})`).join('; ')}</p>
           )}

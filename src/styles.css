@@ -1259,3 +1259,240 @@ button.picker-row:hover {
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---- inline "learn more" links ---- */
+.link-btn {
+  font: inherit;
+  font-size: inherit;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---- wizard API-key step ---- */
+.wizard-keystep {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--wash);
+}
+.wizard-keystep a {
+  color: var(--accent);
+}
+.wizard-keyrow {
+  display: flex;
+  gap: 8px;
+}
+.wizard-keyrow .scan-path {
+  flex: 1;
+}
+
+/* ---- AI provider chooser (wizard + settings) ---- */
+.provider-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.provider-card {
+  font: inherit;
+  flex: 1 1 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.provider-card:hover {
+  background: var(--wash);
+}
+.provider-card span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.provider-on {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+.provider-badge {
+  font-size: 11px !important;
+  color: var(--text-muted) !important;
+}
+.settings-freemodel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.settings-freemodel {
+  max-width: 220px;
+  font-size: 12.5px;
+  padding: 4px 8px;
+}
+.settings-ollama-model select {
+  margin-left: 4px;
+}
+
+/* ---- getting-started checklist ---- */
+.onboarding {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-1);
+}
+.onboarding-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+.onboarding-step {
+  font: inherit;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.onboarding-step:hover:not(:disabled) {
+  background: var(--wash);
+}
+.onboarding-done {
+  color: var(--text-muted);
+  cursor: default;
+  text-decoration: line-through;
+}
+.onboarding-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--wash);
+  color: var(--text-secondary);
+}
+.onboarding-done .onboarding-mark {
+  background: var(--accent);
+  color: #fff;
+}
+.onboarding-dismiss {
+  margin-left: auto;
+}
+
+/* ---- help panel ---- */
+.help-body {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.help-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 200px;
+  position: sticky;
+  top: 12px;
+}
+.help-nav-item {
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.help-nav-item:hover {
+  background: var(--wash);
+}
+.help-nav-on {
+  background: var(--wash);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.help-content {
+  flex: 1;
+  min-width: 0;
+  max-width: 68ch;
+  line-height: 1.55;
+}
+.help-content h1 {
+  font-size: 20px;
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
+}
+.help-content h2 {
+  font-size: 15px;
+  margin: 20px 0 6px;
+}
+.help-content h3 {
+  font-size: 13.5px;
+  margin: 16px 0 4px;
+}
+.help-content p,
+.help-content li {
+  color: var(--text-secondary);
+}
+.help-content strong {
+  color: var(--text-primary);
+}
+.help-content a {
+  color: var(--accent);
+}
+.help-content code {
+  font-size: 12.5px;
+  background: var(--wash);
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+.help-content pre {
+  background: var(--wash);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+.help-content pre code {
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+}
+@media (max-width: 720px) {
+  .help-body {
+    flex-direction: column;
+  }
+  .help-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex-basis: auto;
+  }
+}

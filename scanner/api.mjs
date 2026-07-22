@@ -86,13 +86,69 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
 
   const routes = {
     '/api/mode': json(async () => {
-      const { hasServerKey } = await import('./scan.mjs')
-      return { hosted, authRequired: Boolean(password), hasServerKey: hasServerKey() }
+      const { hasServerKey, serverKeys } = await import('./llm.mjs')
+      return { hosted, authRequired: Boolean(password), hasServerKey: hasServerKey(), serverKeys: serverKeys() }
     }),
 
     '/api/keycheck': json(async () => {
-      const { hasServerKey } = await import('./scan.mjs')
-      return { hasServerKey: hasServerKey() }
+      const { hasServerKey, serverKeys } = await import('./llm.mjs')
+      return { hasServerKey: hasServerKey(), serverKeys: serverKeys() }
+    }),
+
+    // Validate a provider config without a paid call: key check for
+    // Anthropic/OpenAI (their free models endpoints), reachability + model
+    // list for Ollama. The wizard and Settings both use this.
+    '/api/keytest': json(async (body) => {
+      const { testProvider } = await import('./llm.mjs')
+      return testProvider({ provider: body.provider ?? 'anthropic', apiKey: body.apiKey, baseUrl: body.baseUrl })
+    }),
+
+    // Browser-side LLM transport (hosted mode + the user's local Ollama):
+    // prepare returns the exact request the server would have sent; the
+    // browser runs it against localhost Ollama; finish post-processes the raw
+    // output into the same result the server-side path produces.
+    '/api/ai/prepare': ndjson(async (body, onStatus) => {
+      if (body.task === 'insights') {
+        if (!body.summary) throw new Error('insights prepare needs a summary')
+        const { buildInsightsRequest } = await import('./insights.mjs')
+        return { request: buildInsightsRequest(body.summary), ctx: {} }
+      }
+      if (body.task === 'connect') {
+        const { buildAnalysisRequest } = await import('./connect.mjs')
+        const { path: targetPath, connectionString, digest } = body
+        if (digest) {
+          if (!digest.name || typeof digest.digest !== 'string' || !digest.digest) {
+            throw new Error('Digest upload must include {name, digest, included, skipped}')
+          }
+          return buildAnalysisRequest(null, connectionString || undefined, { onStatus, prebuilt: digest })
+        }
+        if (!targetPath) throw new Error('connect prepare needs a path or a digest')
+        assertHostedPathAllowed(hosted, targetPath)
+        return buildAnalysisRequest(targetPath, connectionString || undefined, { onStatus })
+      }
+      throw new Error(`Unknown AI task: ${body.task}`)
+    }),
+
+    '/api/ai/finish': json(async (body) => {
+      const { task, output, ctx, model, provider, usage } = body
+      let object = output
+      if (typeof output === 'string') {
+        try {
+          object = JSON.parse(output)
+        } catch {
+          throw new Error('The local model did not return valid JSON — try a larger model or a cloud provider')
+        }
+      }
+      const meta = { model: String(model ?? ''), provider: String(provider ?? 'ollama'), usage }
+      if (task === 'insights') {
+        const { finishInsights } = await import('./insights.mjs')
+        return finishInsights(object, meta)
+      }
+      if (task === 'connect') {
+        const { finishAnalysis } = await import('./connect.mjs')
+        return finishAnalysis(object, ctx ?? {}, meta)
+      }
+      throw new Error(`Unknown AI task: ${task}`)
     }),
 
     '/api/fs/list': json(async (body) => {
@@ -116,27 +172,28 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
 
     '/api/connect/analyze': ndjson(async (body, onStatus) => {
       const { analyzeProject } = await import('./connect.mjs')
-      const { path: targetPath, connectionString, model, apiKey, digest } = body
+      const { path: targetPath, connectionString, model, apiKey, provider, baseUrl, digest } = body
+      const aiOpts = { onStatus, model, apiKey, provider, baseUrl }
       if (digest) {
         // Browser-side digest (hosted local-folder flow)
         if (!digest.name || typeof digest.digest !== 'string' || !digest.digest) {
           throw new Error('Digest upload must include {name, digest, included, skipped}')
         }
-        return analyzeProject(null, connectionString || undefined, { onStatus, model, apiKey, prebuilt: digest })
+        return analyzeProject(null, connectionString || undefined, { ...aiOpts, prebuilt: digest })
       }
       if (!targetPath) throw new Error('Body must include a path or a digest')
       assertHostedPathAllowed(hosted, targetPath)
-      return analyzeProject(targetPath, connectionString || undefined, { onStatus, model, apiKey })
+      return analyzeProject(targetPath, connectionString || undefined, aiOpts)
     }),
 
     '/api/instrument/prepare': ndjson(async (body, onStatus) => {
-      const { path: targetPath, events, model, apiKey } = body
+      const { path: targetPath, events, model, apiKey, provider, baseUrl } = body
       if (!targetPath || !Array.isArray(events) || events.length === 0) {
         throw new Error('Body must be {"path": "...", "events": [...accepted plan events]}')
       }
       assertHostedPathAllowed(hosted, targetPath)
       const { prepareInstrumentation } = await import('./instrument.mjs')
-      const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey })
+      const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey, provider, baseUrl })
       onStatus(`Prepared ${prep.edits.length} edits (${prep.edits.filter((e) => e.status === 'ok').length} clean)`)
       return prep
     }),
@@ -192,7 +249,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     '/api/insights': json(async (body) => {
       if (!body.summary) throw new Error('Body must include a usage summary')
       const { findInsights } = await import('./insights.mjs')
-      const out = await findInsights(body.summary, { model: body.model, apiKey: body.apiKey })
+      const out = await findInsights(body.summary, { model: body.model, apiKey: body.apiKey, provider: body.provider, baseUrl: body.baseUrl })
       log(`insights: ${out.insights.length} found (${out.meta.usage.input_tokens} in / ${out.meta.usage.output_tokens} out tokens)`)
       return out
     }),
@@ -211,11 +268,11 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     }),
 
     '/api/scan': ndjson(async (body, onStatus) => {
-      const { path: targetPath, model, apiKey } = body
+      const { path: targetPath, model, apiKey, provider, baseUrl } = body
       if (!targetPath || typeof targetPath !== 'string') throw new Error('Body must be {"path": "/path/to/codebase"}')
       assertHostedPathAllowed(hosted, targetPath)
       const { scanCodebase } = await import('./scan.mjs')
-      return scanCodebase(targetPath, { model, apiKey, onStatus })
+      return scanCodebase(targetPath, { model, apiKey, provider, baseUrl, onStatus })
     }),
   }
 

@@ -15,6 +15,8 @@ import { EventPlanPanel } from './components/EventPlanPanel'
 import { ConnectWizard } from './components/ConnectWizard'
 import { InsightCards, type InsightsResponse } from './components/InsightCards'
 import { SettingsPanel } from './components/SettingsPanel'
+import { HelpPanel } from './components/HelpPanel'
+import { OnboardingChecklist } from './components/OnboardingChecklist'
 import { ShapeIcon } from './components/ShapeIcon'
 
 type ThemePref = 'auto' | 'light' | 'dark'
@@ -117,6 +119,7 @@ export default function App() {
   const [importError, setImportError] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(() => persisted === null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpPage, setHelpPage] = useState<string | null>(null)
   const [appMode, setAppMode] = useState<AppMode>({ hosted: false, authRequired: false, hasServerKey: true })
   const [modeReady, setModeReady] = useState(false)
   const [authOk, setAuthOk] = useState(true)
@@ -627,6 +630,15 @@ export default function App() {
           </div>
           <button
             className="btn btn-icon"
+            onClick={() => setHelpPage(helpPage ? null : 'getting-started')}
+            title="Help & documentation"
+            aria-label="Help"
+            aria-expanded={helpPage != null}
+          >
+            ?
+          </button>
+          <button
+            className="btn btn-icon"
             onClick={() => setSettingsOpen(!settingsOpen)}
             title="Settings — model & API key"
             aria-label="Settings"
@@ -686,11 +698,30 @@ export default function App() {
         )}
       </div>
 
-      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
+      <OnboardingChecklist
+        flags={{
+          demo: dataset.source.startsWith('Sample data'),
+          connect: plan != null || workspaces.length > 0,
+          users: dataset.source !== NO_PROJECT && !dataset.source.startsWith('Sample data') && dataset.events.length > 0,
+          insights: insightsSaved != null,
+        }}
+        onDemo={() => {
+          const next = seed + 1
+          setSeed(next)
+          loadDataset(generateSample(next))
+        }}
+        onConnect={() => setWizardOpen(true)}
+        onHelp={setHelpPage}
+      />
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} onHelp={() => setHelpPage('api-keys-and-models')} />}
+
+      {helpPage != null && <HelpPanel page={helpPage} onNavigate={setHelpPage} onClose={() => setHelpPage(null)} />}
 
       {wizardOpen && modeReady && (
         <ConnectWizard
           hosted={appMode.hosted}
+          serverKeys={appMode.serverKeys ?? { anthropic: appMode.hasServerKey, openai: false }}
           onData={onWizardData}
           onDbImport={(events, source, sync) => {
             try {
@@ -845,8 +876,12 @@ export default function App() {
             <span className="scan-pulse" aria-hidden="true" />
             <div>
               <strong>Waiting for the first event.</strong> This project has no data yet — as soon as the instrumented
-              app sends its first <code>track()</code> call to the ingest endpoint, it appears here (checked every ~15
-              seconds, no reload needed).
+              app sends its first <code>track()</code> call, it appears here (checked every ~15 seconds, no reload
+              needed). Make sure the app's environment has:
+              <pre className="instr-snippet">DOTCHART_INGEST_URL={window.location.origin}/ingest</pre>
+              <button className="link-btn" onClick={() => setHelpPage('live-tracking')}>
+                How live tracking works
+              </button>
             </div>
           </div>
         ) : model.rows.length > 0 ? (

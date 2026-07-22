@@ -7,9 +7,10 @@ export interface AppMode {
   hosted: boolean
   authRequired: boolean
   hasServerKey: boolean
+  serverKeys?: { anthropic: boolean; openai: boolean }
 }
 
-let current: AppMode = { hosted: false, authRequired: false, hasServerKey: true }
+let current: AppMode = { hosted: false, authRequired: false, hasServerKey: true, serverKeys: { anthropic: true, openai: false } }
 
 export function getAppMode(): AppMode {
   return current

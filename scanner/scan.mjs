@@ -8,10 +8,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import Anthropic from '@anthropic-ai/sdk'
+import { aiLabel, resolveAi, runStructured } from './llm.mjs'
 
-export const DEFAULT_MODEL = 'claude-sonnet-5'
-export const ALLOWED_MODELS = ['claude-sonnet-5', 'claude-opus-4-8']
+export { hasServerKey, serverKeys } from './llm.mjs'
 const MAX_TOTAL_BYTES = 400_000 // ~100k tokens of code digest, well within 1M context
 const MAX_FILE_BYTES = 24_000
 
@@ -221,28 +220,8 @@ Principles:
 - Instrumentation points must reference real files and functions from the provided code, with a concrete one-line tracking call using dotchart.track(userId, 'event_key', props).
 - If the codebase is a frontend-only or library project, still propose the events its END USERS would generate, instrumented at the closest real code location.`
 
-function loadEnvKey(projectRoot) {
-  if (process.env.ANTHROPIC_API_KEY) return process.env.ANTHROPIC_API_KEY
-  try {
-    const env = fs.readFileSync(path.join(projectRoot, '.env'), 'utf8')
-    const m = env.match(/^ANTHROPIC_API_KEY=(.+)$/m)
-    if (m) return m[1].trim()
-  } catch {
-    /* no .env */
-  }
-  return null
-}
-
-export function hasServerKey() {
-  const projectRoot = path.dirname(fileURLToPath(import.meta.url)) + '/..'
-  return loadEnvKey(path.resolve(projectRoot)) !== null
-}
-
-export async function scanCodebase(targetPath, { onStatus = () => {}, model, apiKey: userKey } = {}) {
-  const MODEL = ALLOWED_MODELS.includes(model) ? model : DEFAULT_MODEL
-  const projectRoot = path.dirname(fileURLToPath(import.meta.url)) + '/..'
-  const apiKey = userKey || loadEnvKey(path.resolve(projectRoot))
-  if (!apiKey) throw new Error('No API key — add yours in Settings, or put ANTHROPIC_API_KEY in the project .env')
+export async function scanCodebase(targetPath, { onStatus = () => {}, model, apiKey, provider, baseUrl } = {}) {
+  const ai = resolveAi({ provider, model, apiKey, baseUrl })
 
   const root = path.resolve(targetPath)
   if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
@@ -252,7 +231,7 @@ export async function scanCodebase(targetPath, { onStatus = () => {}, model, api
   onStatus(`Collecting files from ${root}…`)
   const { digest, included, skipped, trackedKeys } = buildDigest(root)
   const kb = Math.round(digest.length / 1024)
-  onStatus(`Read ${included} files (~${kb} KB${skipped > 0 ? `, ${skipped} more skipped by size budget` : ''}) — sending to ${MODEL}…`)
+  onStatus(`Read ${included} files (~${kb} KB${skipped > 0 ? `, ${skipped} more skipped by size budget` : ''}) — sending to ${aiLabel(ai)}…`)
 
   const existingKeys = trackedKeys ?? extractTrackedKeys(digest)
   const existingNote = existingKeys.length
@@ -260,47 +239,22 @@ export async function scanCodebase(targetPath, { onStatus = () => {}, model, api
     : ''
   if (existingKeys.length) onStatus(`Found ${existingKeys.length} existing tracking calls — keeping their exact event keys`)
 
-  const client = new Anthropic({ apiKey })
-  const stream = client.messages.stream({
-    model: MODEL,
-    max_tokens: 32000,
-    thinking: { type: 'adaptive' },
-    system: SYSTEM,
-    output_config: { format: { type: 'json_schema', schema: PLAN_SCHEMA } },
-    messages: [
-      {
-        role: 'user',
-        content: `Analyze this codebase and propose the analytics event plan.${existingNote}\n\n${digest}`,
-      },
-    ],
-  })
-
-  // Live progress off the stream: announce when Claude starts reasoning, then
-  // count drafted events as the structured JSON streams out.
-  let outputText = ''
+  // Live progress: count drafted events as the structured JSON streams out
   let draftedEvents = 0
-  let announcedThinking = false
-  stream.on('streamEvent', (event) => {
-    if (event.type === 'content_block_start' && event.content_block?.type === 'thinking' && !announcedThinking) {
-      announcedThinking = true
-      onStatus('Claude is reading the code and planning…')
-    }
+  const { object: plan, usage } = await runStructured(ai, {
+    system: SYSTEM,
+    prompt: `Analyze this codebase and propose the analytics event plan.${existingNote}\n\n${digest}`,
+    schema: PLAN_SCHEMA,
+    maxTokens: 32000,
+    onStatus,
+    onText: (snapshot) => {
+      const n = (snapshot.match(/"key"\s*:/g) || []).length
+      if (n > draftedEvents) {
+        draftedEvents = n
+        onStatus(`Writing the event plan — ${n} event${n === 1 ? '' : 's'} drafted…`)
+      }
+    },
   })
-  stream.on('text', (delta) => {
-    outputText += delta
-    const n = (outputText.match(/"key"\s*:/g) || []).length
-    if (n > draftedEvents) {
-      draftedEvents = n
-      onStatus(`Writing the event plan — ${n} event${n === 1 ? '' : 's'} drafted…`)
-    }
-  })
-
-  const message = await stream.finalMessage()
-
-  if (message.stop_reason === 'refusal') throw new Error('Model declined the request')
-  if (message.stop_reason === 'max_tokens') throw new Error('Response truncated (max_tokens) — try a smaller codebase')
-  const text = message.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
-  const plan = JSON.parse(text)
   const { renamed, added } = reconcilePlanWithExistingKeys(plan, existingKeys)
   if (renamed.length) onStatus(`Aligned ${renamed.length} event key${renamed.length === 1 ? '' : 's'} with existing instrumentation (${renamed.join('; ')})`)
   if (added.length) onStatus(`Added ${added.length} already-instrumented event${added.length === 1 ? '' : 's'} (${added.join(', ')})`)
@@ -310,9 +264,10 @@ export async function scanCodebase(targetPath, { onStatus = () => {}, model, api
       scanned_path: root,
       files_included: included,
       files_skipped: skipped,
-      model: MODEL,
+      model: ai.model,
+      provider: ai.provider,
       generated_at: new Date().toISOString(),
-      usage: { input_tokens: message.usage.input_tokens, output_tokens: message.usage.output_tokens },
+      usage,
     },
   }
 }

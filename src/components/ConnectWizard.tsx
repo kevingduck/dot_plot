@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DbSyncConfig, DiscoveredProject, EventPlan, RawEvent } from '../types'
 import { postJson, postNdjson } from '../lib/api'
-import { addRecent, aiParams, getRecents } from '../lib/settings'
+import { PROVIDERS, addRecent, aiParams, getRecents, getSettings, saveSettings, type Provider } from '../lib/settings'
+import { browserOllamaActive, runBrowserOllamaTask } from '../lib/ai'
+import { probeOllama, type OllamaProbe } from '../lib/ollamaClient'
 import { digestFromFileList, pickLocalFolder, type LocalDigest } from '../lib/localdigest'
 import { DbPanel } from './DbPanel'
 
@@ -23,6 +25,7 @@ interface DirListing {
 
 interface Props {
   hosted: boolean
+  serverKeys: { anthropic: boolean; openai: boolean }
   onData: (events: RawEvent[], source: string, plan: EventPlan, sync?: DbSyncConfig) => void
   onPlanOnly: (plan: EventPlan) => void
   onDbImport: (events: RawEvent[], source: string, sync?: DbSyncConfig) => void
@@ -100,7 +103,7 @@ function FolderPicker({ onSelect, disabled }: { onSelect: (path: string) => void
   )
 }
 
-export function ConnectWizard({ hosted, onData, onPlanOnly, onDbImport, onImportCsv, onImportPlanFile, onDemo, onClose }: Props) {
+export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImport, onImportCsv, onImportPlanFile, onDemo, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>('pick')
   const [tab, setTab] = useState<'local' | 'github'>('local')
   const [ghUrl, setGhUrl] = useState('')
@@ -116,6 +119,53 @@ export function ConnectWizard({ hosted, onData, onPlanOnly, onDbImport, onImport
   const [localDigest, setLocalDigest] = useState<LocalDigest | null>(null)
   const [digesting, setDigesting] = useState(false)
   const dirInputRef = useRef<HTMLInputElement>(null)
+
+  // "Choose your AI" — analysis needs a working provider: a Claude/OpenAI key
+  // (the user's or the server's) or a reachable Ollama. When nothing is
+  // configured the analyze step becomes a one-question setup instead of a
+  // dead end; when something is, the step never appears.
+  const [aiCfg, setAiCfg] = useState(getSettings)
+  const [keyDraft, setKeyDraft] = useState('')
+  const [keyBusy, setKeyBusy] = useState(false)
+  const [keyError, setKeyError] = useState<string | null>(null)
+  const [ollama, setOllama] = useState<OllamaProbe | null>(null)
+
+  // Silent probe so the Ollama card can say "detected · N models"
+  useEffect(() => {
+    probeOllama(aiCfg.ollamaUrl).then(setOllama)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const aiReady =
+    aiCfg.provider === 'ollama' ? aiCfg.models.ollama !== '' : serverKeys[aiCfg.provider] || aiCfg.keys[aiCfg.provider] !== ''
+
+  const pickProvider = (p: Provider) => {
+    const next = { ...aiCfg, provider: p }
+    if (p === 'ollama' && ollama?.ok && ollama.models.length > 0 && !ollama.models.includes(next.models.ollama)) {
+      next.models = { ...next.models, ollama: ollama.models[0] }
+    }
+    setAiCfg(next)
+    saveSettings(next)
+    setKeyError(null)
+  }
+
+  const saveKey = async () => {
+    if (aiCfg.provider === 'ollama') return
+    setKeyBusy(true)
+    setKeyError(null)
+    try {
+      const apiKey = keyDraft.trim()
+      await postJson('/api/keytest', { provider: aiCfg.provider, apiKey })
+      const next = { ...aiCfg, keys: { ...aiCfg.keys, [aiCfg.provider]: apiKey } }
+      saveSettings(next)
+      setAiCfg(next)
+      setKeyDraft('')
+    } catch (err) {
+      setKeyError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setKeyBusy(false)
+    }
+  }
 
   const useDigest = (d: LocalDigest) => {
     if (d.included === 0) {
@@ -185,17 +235,17 @@ export function ConnectWizard({ hosted, onData, onPlanOnly, onDbImport, onImport
     setError(null)
     try {
       const conn = useDb && project.databases[dbIndex] ? project.databases[dbIndex].connectionString : undefined
-      const result = await postNdjson<EventPlan>(
-        '/api/connect/analyze',
-        localDigest
-          ? {
-              digest: { name: localDigest.name, digest: localDigest.digest, included: localDigest.included, skipped: localDigest.skipped, trackedKeys: localDigest.trackedKeys },
-              connectionString: conn,
-              ...aiParams(),
-            }
-          : { path: project.root, connectionString: conn, ...aiParams() },
-        setStatus,
-      )
+      const payload = localDigest
+        ? {
+            digest: { name: localDigest.name, digest: localDigest.digest, included: localDigest.included, skipped: localDigest.skipped, trackedKeys: localDigest.trackedKeys },
+            connectionString: conn,
+          }
+        : { path: project.root, connectionString: conn }
+      // Hosted + local Ollama: the server can't reach the user's machine, so
+      // the model call runs right here in the browser.
+      const result = browserOllamaActive()
+        ? await runBrowserOllamaTask<EventPlan>('connect', payload, setStatus)
+        : await postNdjson<EventPlan>('/api/connect/analyze', { ...payload, ...aiParams() }, setStatus)
       setPlan(result)
       setAccepted(new Set(result.events.filter((e) => e.tier !== 'noise').map((e) => e.key)))
       setPhase('review')
@@ -394,13 +444,133 @@ export function ConnectWizard({ hosted, onData, onPlanOnly, onDbImport, onImport
           ) : (
             <div className="scan-hint">No database connection found in the repo's env files — analysis will use the code only.</div>
           )}
+          {!aiReady && (
+            <div className="wizard-keystep">
+              <div className="scan-hint">
+                <strong>One thing first — choose your AI.</strong> It reads the code and proposes your event plan; you
+                can change it any time in ⚙ Settings.
+              </div>
+              <div className="provider-row" role="radiogroup" aria-label="AI provider">
+                {PROVIDERS.map((p) => {
+                  const badge =
+                    p.id === 'ollama'
+                      ? ollama?.ok
+                        ? `detected · ${ollama.models.length} model${ollama.models.length === 1 ? '' : 's'}`
+                        : 'not detected'
+                      : serverKeys[p.id as 'anthropic' | 'openai']
+                        ? 'key on server ✓'
+                        : aiCfg.keys[p.id as 'anthropic' | 'openai']
+                          ? 'your key ✓'
+                          : 'needs a key'
+                  return (
+                    <button
+                      key={p.id}
+                      role="radio"
+                      aria-checked={aiCfg.provider === p.id}
+                      className={`provider-card${aiCfg.provider === p.id ? ' provider-on' : ''}`}
+                      onClick={() => pickProvider(p.id)}
+                    >
+                      <strong>{p.label}</strong>
+                      <span>{p.blurb}</span>
+                      <span className="provider-badge">{badge}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              {aiCfg.provider !== 'ollama' && (
+                <>
+                  <div className="scan-hint">
+                    Paste your {aiCfg.provider === 'anthropic' ? 'Anthropic' : 'OpenAI'} API key (
+                    <a
+                      href={aiCfg.provider === 'anthropic' ? 'https://console.anthropic.com/settings/keys' : 'https://platform.openai.com/api-keys'}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      create one here
+                    </a>
+                    ) — an analysis costs a few tens of cents. Stored only in this browser, used per request.
+                  </div>
+                  <div className="wizard-keyrow">
+                    <input
+                      type="password"
+                      className="scan-path"
+                      placeholder={aiCfg.provider === 'anthropic' ? 'sk-ant-…' : 'sk-…'}
+                      value={keyDraft}
+                      onChange={(e) => setKeyDraft(e.target.value)}
+                      aria-label="API key"
+                      autoComplete="off"
+                    />
+                    <button className="btn btn-primary" onClick={saveKey} disabled={!keyDraft.trim() || keyBusy}>
+                      {keyBusy ? 'Checking…' : 'Save key'}
+                    </button>
+                  </div>
+                </>
+              )}
+              {aiCfg.provider === 'ollama' &&
+                (ollama?.ok ? (
+                  ollama.models.length > 0 ? (
+                    <label className="scan-hint">
+                      Model{' '}
+                      <select
+                        value={aiCfg.models.ollama}
+                        onChange={(e) => {
+                          const next = { ...aiCfg, models: { ...aiCfg.models, ollama: e.target.value } }
+                          setAiCfg(next)
+                          saveSettings(next)
+                        }}
+                        aria-label="Ollama model"
+                      >
+                        {ollama.models.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>{' '}
+                      — free, private, runs on this machine (larger models give better plans)
+                    </label>
+                  ) : (
+                    <div className="scan-hint">
+                      Ollama is running but has no models yet — <code>ollama pull qwen3:8b</code>, then{' '}
+                      <button className="link-btn" onClick={() => probeOllama(aiCfg.ollamaUrl).then(setOllama)}>
+                        re-detect
+                      </button>
+                    </div>
+                  )
+                ) : (
+                  <div className="scan-hint">
+                    Couldn't reach Ollama from this page.{' '}
+                    {hosted ? (
+                      <>
+                        Start it with this page allowed, then re-detect:{' '}
+                        <code>OLLAMA_ORIGINS={window.location.origin} ollama serve</code>
+                      </>
+                    ) : (
+                      <>
+                        Install it from <a href="https://ollama.com" target="_blank" rel="noreferrer">ollama.com</a> and make sure it's
+                        running.
+                      </>
+                    )}{' '}
+                    <button className="link-btn" onClick={() => probeOllama(aiCfg.ollamaUrl).then(setOllama)}>
+                      Re-detect
+                    </button>{' '}
+                    · Remote Ollama URL? Set it in ⚙ Settings.
+                  </div>
+                ))}
+              {keyError && <div className="scan-error">⚠ {keyError}</div>}
+            </div>
+          )}
           <div className="wizard-actions">
-            <button className="btn btn-primary" onClick={analyze}>
+            <button className="btn btn-primary" onClick={analyze} disabled={!aiReady} title={aiReady ? undefined : 'Choose an AI above first'}>
               Analyze project (~1 min)
             </button>
             <button className="btn btn-ghost" onClick={() => setPhase('pick')}>
               Back
             </button>
+            {aiReady && (
+              <span className="scan-hint">
+                AI: {aiCfg.provider === 'ollama' ? `${aiCfg.models.ollama} (local)` : aiCfg.models[aiCfg.provider]} — change in ⚙ Settings
+              </span>
+            )}
           </div>
         </div>
       )}
