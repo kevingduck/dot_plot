@@ -14,6 +14,7 @@ const TIER_LABEL: Record<EventTier, string> = {
 
 interface Props {
   plan: EventPlan
+  ingestPath?: string // '/ingest' or '/ingest/<project token>' in account mode
   datasetEvents: Set<string>
   datasetIsDemo: boolean
   onApply: (accepted: { key: string; label: string }[], coreKey: string) => void
@@ -41,7 +42,7 @@ function guessMatch(planKey: string, datasetNames: string[]): string {
   return bestScore >= 2 ? best : ''
 }
 
-export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, onClose }: Props) {
+export function EventPlanPanel({ plan, ingestPath = '/ingest', datasetEvents, datasetIsDemo, onApply, onClose }: Props) {
   const [accepted, setAccepted] = useState<Set<string>>(
     () => new Set(plan.events.filter((e) => e.tier !== 'noise').map((e) => e.key)),
   )
@@ -230,7 +231,7 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
               <strong>Getting the track() calls into your code, from the hosted app:</strong> either run DotChart
               locally (<code>npm run dev</code>) and open this project there — it writes the changes for you on a git
               branch — or copy each event's snippet from the "Where" column below into the shown file by hand. Once the
-              instrumented app is deployed with its ingest URL set to <code>{window.location.origin}/ingest</code>,
+              instrumented app is deployed with its ingest URL set to <code>{window.location.origin}{ingestPath}</code>,
               events appear here automatically. Already deployed the instrumentation? Then you're done — just wait for
               the first event.
             </p>
@@ -242,6 +243,7 @@ export function EventPlanPanel({ plan, datasetEvents, datasetIsDemo, onApply, on
           <InstrumentPanel
             autoStart
             defaultPath={plan.meta?.scanned_path ?? ''}
+            ingestPath={ingestPath}
             events={plan.events.filter((e) => accepted.has(e.key))}
           />
         </div>

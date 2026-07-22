@@ -1,9 +1,15 @@
 # Live tracking
 
-DotChart has a built-in ingest endpoint: `POST /ingest` on the same host as
-the app (CORS-open, batched, validated, capped). Instrumented apps send
-events there and the grid updates within ~15 seconds — the **● N tracked
+DotChart has a built-in ingest endpoint on the same host as the app
+(CORS-open, batched, validated, capped). Instrumented apps send events
+there and the grid updates within ~15 seconds — the **● N tracked
 events** chip in the status bar shows the feed.
+
+On a DotChart with accounts, every project has its **own** ingest URL —
+`POST /ingest/<token>` — shown in the app wherever the ingest URL appears
+(the waiting screen, the instrumentation done screen). Events sent there
+land in that project only, no matter what the events are named. On a
+single-user DotChart it's simply `POST /ingest`.
 
 ## Point your app at it
 

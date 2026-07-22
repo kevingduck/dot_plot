@@ -46,6 +46,7 @@ const handleApi = createApiHandler({
   log: (s) => console.log(`[dotchart] ${s}`),
   hosted: HOSTED,
   password: PASSWORD,
+  authMode: process.env.DOTCHART_AUTH === '1',
 })
 
 const server = http.createServer(async (req, res) => {

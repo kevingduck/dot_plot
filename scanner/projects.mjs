@@ -8,6 +8,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+// Legacy/local mode keeps workspaces in ~/.dotchart/projects; account mode
+// passes each user's own root instead (~/.dotchart/users/<uid>/projects).
 const DIR = path.join(os.homedir(), '.dotchart', 'projects')
 
 function slugFor(projectPath) {
@@ -21,26 +23,37 @@ function slugFor(projectPath) {
   return `${base || 'project'}-${hash}`
 }
 
-export function saveWorkspace(ws) {
+export function saveWorkspace(ws, dir = DIR) {
   if (!ws || typeof ws.path !== 'string' || !ws.path) throw new Error('Workspace needs a project path')
-  fs.mkdirSync(DIR, { recursive: true })
+  fs.mkdirSync(dir, { recursive: true })
   const slug = slugFor(ws.path)
-  const record = { ...ws, slug, savedAt: Date.now() }
-  fs.writeFileSync(path.join(DIR, `${slug}.json`), JSON.stringify(record))
-  return { slug, savedAt: record.savedAt }
+  // Every project keeps a stable ingest token across saves — in account mode
+  // it addresses the project's own event stream (POST /ingest/<token>)
+  let token = typeof ws.ingest_token === 'string' && ws.ingest_token ? ws.ingest_token : ''
+  if (!token) {
+    try {
+      token = JSON.parse(fs.readFileSync(path.join(dir, `${slug}.json`), 'utf8')).ingest_token ?? ''
+    } catch {
+      /* new workspace */
+    }
+  }
+  if (!token) token = crypto.randomBytes(12).toString('hex')
+  const record = { ...ws, slug, ingest_token: token, savedAt: Date.now() }
+  fs.writeFileSync(path.join(dir, `${slug}.json`), JSON.stringify(record))
+  return { slug, savedAt: record.savedAt, ingest_token: token }
 }
 
-export function listWorkspaces() {
+export function listWorkspaces(dir = DIR) {
   let files
   try {
-    files = fs.readdirSync(DIR).filter((f) => f.endsWith('.json'))
+    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'))
   } catch {
     return []
   }
   const out = []
   for (const f of files) {
     try {
-      const ws = JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8'))
+      const ws = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))
       out.push({
         slug: ws.slug ?? f.replace(/\.json$/, ''),
         name: String(ws.name ?? path.basename(ws.path ?? f)).replace(/^local:/, ''),
@@ -51,6 +64,7 @@ export function listWorkspaces() {
         hasPlan: Boolean(ws.plan),
         planKeys: (ws.plan?.events ?? []).map((e) => e.key),
         hasInsights: Boolean(ws.insights),
+        ingest_token: ws.ingest_token ?? '',
       })
     } catch {
       /* skip corrupt file */
@@ -142,17 +156,17 @@ function normalizeWorkspace(ws, file) {
   return ws
 }
 
-export function loadWorkspace(slug) {
+export function loadWorkspace(slug, dir = DIR) {
   if (!/^[a-z0-9-]+$/.test(slug)) throw new Error('Bad workspace id')
-  const file = path.join(DIR, `${slug}.json`)
+  const file = path.join(dir, `${slug}.json`)
   if (!fs.existsSync(file)) throw new Error('Workspace not found')
   return normalizeWorkspace(sanitizeWorkspace(JSON.parse(fs.readFileSync(file, 'utf8')), file), file)
 }
 
-export function deleteWorkspace(slug) {
+export function deleteWorkspace(slug, dir = DIR) {
   if (!/^[a-z0-9-]+$/.test(slug)) throw new Error('Bad workspace id')
   try {
-    fs.rmSync(path.join(DIR, `${slug}.json`))
+    fs.rmSync(path.join(dir, `${slug}.json`))
   } catch {
     /* already gone */
   }

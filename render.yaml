@@ -14,8 +14,10 @@ services:
     envVars:
       - key: DOTCHART_HOSTED
         value: '1'
+      - key: DOTCHART_AUTH
+        value: '1' # accounts: sign up / log in, per-user projects, per-project ingest URLs
       - key: DOTCHART_PASSWORD
-        sync: false # set in dashboard — protects everything except /ingest
+        sync: false # only used if DOTCHART_AUTH is removed (single-user mode)
       - key: ANTHROPIC_API_KEY
         sync: false # set in dashboard — used for analyses (users can also BYO key)
     disk:

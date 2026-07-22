@@ -10,6 +10,7 @@ interface Props {
   defaultPath: string
   events: PlannedEvent[] // accepted events only
   autoStart?: boolean // kick off the proposal immediately (user clicked Start tracking)
+  ingestPath?: string // '/ingest' or '/ingest/<project token>' in account mode
 }
 
 /** Highlight lines in new_string that aren't in old_string (edits are additive). */
@@ -37,7 +38,7 @@ function Diff({ edit }: { edit: PreparedEdit }) {
   )
 }
 
-export function InstrumentPanel({ defaultPath, events, autoStart }: Props) {
+export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '/ingest' }: Props) {
   const hosted = getAppMode().hosted
   const [phase, setPhase] = useState<Phase>('idle')
   const [path, setPath] = useState(defaultPath)
@@ -113,7 +114,7 @@ export function InstrumentPanel({ defaultPath, events, autoStart }: Props) {
   if (phase === 'done' && result) {
     // Ingest is served by THIS app, whatever origin it runs on — dev server,
     // npx, or a hosted deployment. Never hardcode a port here.
-    const ingestUrl = `${window.location.origin}/ingest`
+    const ingestUrl = `${window.location.origin}${ingestPath}`
     return (
       <div className="instrument-wrap">
         <div className="instrument-done">

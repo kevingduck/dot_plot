@@ -32,9 +32,20 @@ DOTCHART_HOSTED=1 DOTCHART_PASSWORD=… ANTHROPIC_API_KEY=… npm start
 - `DOTCHART_HOSTED=1` — hosted mode: disables machine-local features
   (server-side folder browsing, applying git branches, localhost
   databases). Connect works via GitHub or the browser folder picker.
-- `DOTCHART_PASSWORD` — **set this on any public deployment.** Everything
-  except `/ingest` and `/health` requires it; visitors get a lock screen.
-  Ingest stays open by design — it's validated and capped.
+- `DOTCHART_AUTH=1` — **accounts mode**, the right choice for a shared
+  deployment: users sign up / log in, each sees only their own projects,
+  and every project gets its own ingest URL (`/ingest/<token>`). The
+  first account created adopts any pre-accounts workspaces and events.
+- `DOTCHART_SECRET` — session-signing secret for accounts mode (a random
+  one is generated and persisted if unset — fine on a single instance
+  with a disk).
+- `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` — optional: enables
+  "Continue with GitHub" on the login screen. Register an OAuth app at
+  github.com → Settings → Developer settings with callback URL
+  `https://your-host/api/auth/github/callback`.
+- `DOTCHART_PASSWORD` — simpler alternative to accounts for a
+  single-user/team deployment: one shared password, one shared workspace
+  set. Ignored when `DOTCHART_AUTH=1`.
 - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` — optional shared keys for AI
   analysis; users can also bring their own key (or use local Ollama) in
   ⚙ Settings.

@@ -6,6 +6,9 @@ import { postJson } from './api'
 export interface AppMode {
   hosted: boolean
   authRequired: boolean
+  authMode?: boolean
+  user?: { email: string } | null
+  githubOauth?: boolean
   hasServerKey: boolean
   serverKeys?: { anthropic: boolean; openai: boolean }
 }

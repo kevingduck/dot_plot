@@ -13,6 +13,7 @@ import { StatTiles } from './components/StatTiles'
 import { UserDrawer } from './components/UserDrawer'
 import { EventPlanPanel } from './components/EventPlanPanel'
 import { ConnectWizard } from './components/ConnectWizard'
+import { AuthScreen } from './components/AuthScreen'
 import { InsightCards, type InsightsResponse } from './components/InsightCards'
 import { SettingsPanel } from './components/SettingsPanel'
 import { OnboardingChecklist } from './components/OnboardingChecklist'
@@ -172,7 +173,10 @@ export default function App() {
   const [insightsSaved, setInsightsSaved] = useState<InsightsResponse | null>(persisted?.insights ?? null)
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
   const [projectsMenuOpen, setProjectsMenuOpen] = useState(false)
+  const [ingestToken, setIngestToken] = useState<string | null>(null)
   const projectKey = plan?.meta?.scanned_path ?? null
+  const activeSlug = workspaces.find((w) => w.path === projectKey)?.slug ?? null
+  const ingestPath = ingestToken ? `/ingest/${ingestToken}` : '/ingest'
 
   const refreshWorkspaces = useCallback(() => {
     postJson<{ projects: WorkspaceSummary[] }>('/api/projects/list', {}).then(
@@ -182,10 +186,14 @@ export default function App() {
   }, [])
   useEffect(refreshWorkspaces, [refreshWorkspaces])
 
-  // Fresh session? Open straight into the most recently used project.
+  // Fresh session? Open straight into the most recently used project. In
+  // account mode the server workspaces are ALWAYS the source of truth — the
+  // localStorage cache could belong to a different account on this browser.
   const bootedRef = useRef(false)
   useEffect(() => {
-    if (bootedRef.current || persisted !== null) return
+    if (!modeReady || bootedRef.current) return
+    if (appMode.authMode && !appMode.user) return
+    if (persisted !== null && !appMode.authMode) return
     bootedRef.current = true
     postJson<{ projects: WorkspaceSummary[] }>('/api/projects/list', {}).then((r) => {
       if (r.projects.length > 0) {
@@ -194,21 +202,25 @@ export default function App() {
       }
     }, () => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [modeReady])
 
   // Autosave the active project's workspace (debounced) whenever it changes
   useEffect(() => {
     if (!projectKey) return
     const t = setTimeout(() => {
       const demo = dataset.source.startsWith('Sample data')
-      postJson('/api/projects/save', {
+      postJson<{ ingest_token?: string }>('/api/projects/save', {
         path: projectKey,
         name: projectKey.replace(/^local:/, '').split('/').pop(),
         dataset: demo ? null : dataset,
         plan,
         dbSync,
         insights: insightsSaved,
-      }).then(refreshWorkspaces, () => {})
+        ingest_token: ingestToken || undefined,
+      }).then((r) => {
+        if (r.ingest_token) setIngestToken(r.ingest_token)
+        refreshWorkspaces()
+      }, () => {})
     }, 1200)
     return () => clearTimeout(t)
   }, [projectKey, dataset, plan, dbSync, insightsSaved, refreshWorkspaces])
@@ -231,9 +243,15 @@ export default function App() {
     }
   }, [dataset, plan])
 
-  // Persist real data (not the regenerable sample) across reloads
+  // Persist real data (not the regenerable sample) across reloads. Account
+  // mode never writes the shared browser cache — workspaces live server-side
+  // and another account could log in from this browser next.
   useEffect(() => {
     try {
+      if (appMode.authMode) {
+        localStorage.removeItem(STORE_KEY)
+        return
+      }
       if (dataset.source.startsWith('Sample data') || dataset.source === NO_PROJECT) {
         localStorage.removeItem(STORE_KEY)
         return
@@ -243,7 +261,7 @@ export default function App() {
     } catch {
       /* quota exceeded — skip persistence */
     }
-  }, [dataset, plan, dbSync, insightsSaved])
+  }, [dataset, plan, dbSync, insightsSaved, appMode.authMode])
 
   const loadDataset = useCallback((ds: Dataset) => {
     mergedCountRef.current = 0 // live events re-merge into the new dataset
@@ -308,17 +326,21 @@ export default function App() {
     setEnabledEvents((prev) => (prev.has('__other__') ? prev : new Set([...prev, '__other__'])))
   }, [plan, loadDataset, workspaces, projectKey])
 
-  // Poll the store so tracked events appear on the grid without a reload
+  // Poll the store so tracked events appear on the grid without a reload.
+  // Account mode reads the active project's own stream; without an active
+  // project there is nothing to attach events to, so don't poll.
   useEffect(() => {
+    if (appMode.authMode && !activeSlug) return
+    const scope = appMode.authMode ? { project: activeSlug } : {}
     let stopped = false
     const check = async () => {
       try {
-        const info = await postJson<{ count: number; lastReceived: number | null }>('/api/store/events', { countOnly: true })
+        const info = await postJson<{ count: number; lastReceived: number | null }>('/api/store/events', { countOnly: true, ...scope })
         if (stopped) return
         setLiveCount(info.count)
         setLiveLastAt(info.lastReceived ?? null)
         if (info.count > mergedCountRef.current) {
-          const full = await postJson<{ events: { userId: string; event: string; ts: number }[] }>('/api/store/events', {})
+          const full = await postJson<{ events: RawEvent[] }>('/api/store/events', scope)
           if (stopped) return
           mergedCountRef.current = full.events.length
           mergeLiveEvents(full.events)
@@ -333,7 +355,7 @@ export default function App() {
       stopped = true
       clearInterval(t)
     }
-  }, [mergeLiveEvents])
+  }, [mergeLiveEvents, appMode.authMode, activeSlug])
 
   // Re-import from the connected database, keeping the registry and plan
   const refreshDb = useCallback(async () => {
@@ -398,6 +420,7 @@ export default function App() {
         setPlanOpen(ws.plan != null)
         setDbSync(ws.dbSync ?? null)
         setInsightsSaved(ws.insights ?? null)
+        setIngestToken((ws as { ingest_token?: string }).ingest_token ?? null)
         setHighlightUsers(null)
       } catch (err) {
         setImportError(err instanceof Error ? err.message : String(err))
@@ -484,6 +507,7 @@ export default function App() {
       setDbSync(sync ?? null)
       setInsightsSaved(null) // a different project's insights must not carry over
       setHighlightUsers(null)
+      setIngestToken(null) // the autosave response brings the new project's token
       setWizardOpen(false)
     },
     [loadDataset],
@@ -515,6 +539,10 @@ export default function App() {
     a.click()
     URL.revokeObjectURL(url)
   }, [dataset])
+
+  if (modeReady && appMode.authMode && !appMode.user) {
+    return <AuthScreen githubOauth={appMode.githubOauth ?? false} accentColor={colors.series[0]} />
+  }
 
   if (!authOk) {
     return (
@@ -711,7 +739,18 @@ export default function App() {
 
       <div className="statusbar">
         <span className="source-label">{dataset.source}</span>
-        {appMode.hosted && <span className="mode-chip">hosted</span>}
+        {appMode.hosted && !appMode.authMode && <span className="mode-chip">hosted</span>}
+        {appMode.authMode && appMode.user && (
+          <span className="mode-chip account-chip">
+            {appMode.user.email}
+            <button
+              className="link-btn"
+              onClick={() => postJson('/api/auth/logout', {}).then(() => window.location.reload())}
+            >
+              sign out
+            </button>
+          </span>
+        )}
         {liveCount > 0 && (
           <span
             className="live-chip"
@@ -780,6 +819,7 @@ export default function App() {
             setDbSync(null)
             setInsightsSaved(null)
             setHighlightUsers(null)
+            setIngestToken(null)
             setWizardOpen(false)
           }}
           onClose={() => setWizardOpen(false)}
@@ -799,6 +839,7 @@ export default function App() {
         <EventPlanPanel
           key={`${plan.meta?.generated_at ?? ''}:${plan.events.map((e) => e.key).join(',')}`}
           plan={plan}
+          ingestPath={ingestPath}
           datasetEvents={datasetEventNames}
           datasetIsDemo={dataset.source.startsWith('Sample data') && !dataset.source.includes(' + live')}
           onApply={applyPlan}
@@ -915,7 +956,7 @@ export default function App() {
               <strong>Waiting for the first event.</strong> This project has no data yet — as soon as the instrumented
               app sends its first <code>track()</code> call, it appears here (checked every ~15 seconds, no reload
               needed). Make sure the app's environment has:
-              <pre className="instr-snippet">DOTCHART_INGEST_URL={window.location.origin}/ingest</pre>
+              <pre className="instr-snippet">DOTCHART_INGEST_URL={window.location.origin}{ingestPath}</pre>
               <a className="link-btn" href="/docs/live-tracking" target="_blank" rel="noreferrer">
                 How live tracking works
               </a>

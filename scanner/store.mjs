@@ -1,13 +1,14 @@
-// DotChart event store: append-only JSONL at ~/.dotchart/events.jsonl.
-// Receives what instrumented apps send via track() → POST /ingest; the UI
-// merges it into the grid. Simple by design — one file, one machine, no DB.
+// DotChart event store: append-only JSONL files. Legacy/local mode uses one
+// shared ~/.dotchart/events.jsonl; account mode (DOTCHART_AUTH=1) gives each
+// project its own file under the owner's namespace, addressed by ingest
+// token — see api.mjs. Simple by design: files, one machine, no DB.
 
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-const DIR = path.join(os.homedir(), '.dotchart')
-const FILE = path.join(DIR, 'events.jsonl')
+export const DATA_ROOT = path.join(os.homedir(), '.dotchart')
+const LEGACY_FILE = path.join(DATA_ROOT, 'events.jsonl')
 
 const EVENT_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/
 
@@ -38,18 +39,18 @@ export function normalizeEvent(raw, ua = null) {
   return out
 }
 
-export function appendEvents(events) {
+export function appendEvents(events, file = LEGACY_FILE) {
   if (events.length === 0) return 0
-  fs.mkdirSync(DIR, { recursive: true })
+  fs.mkdirSync(path.dirname(file), { recursive: true })
   const lines = events.map((e) => JSON.stringify({ ...e, received_at: Date.now() })).join('\n') + '\n'
-  fs.appendFileSync(FILE, lines)
+  fs.appendFileSync(file, lines)
   return events.length
 }
 
-export function readEvents() {
+export function readEvents(file = LEGACY_FILE) {
   let text
   try {
-    text = fs.readFileSync(FILE, 'utf8')
+    text = fs.readFileSync(file, 'utf8')
   } catch {
     return []
   }
@@ -66,18 +67,18 @@ export function readEvents() {
   return out
 }
 
-export function storeInfo() {
-  const events = readEvents()
+export function storeInfo(file = LEGACY_FILE) {
+  const events = readEvents(file)
   return {
     count: events.length,
-    file: FILE,
+    file,
     lastReceived: events.length ? Math.max(...events.map((e) => e.received_at ?? e.ts)) : null,
   }
 }
 
-export function clearStore() {
+export function clearStore(file = LEGACY_FILE) {
   try {
-    fs.rmSync(FILE)
+    fs.rmSync(file)
   } catch {
     /* already gone */
   }
