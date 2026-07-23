@@ -227,7 +227,7 @@ Principles:
 - Exactly one core event; a few "activation" (aha moments predicting retention) and "feature" events. 4-10 total.
 - Keys are snake_case past-tense verbs.
 - WHEN A DATABASE SCHEMA IS PROVIDED: for each event, check whether an existing table already records it (a row insert = the event happening). If so, fill db_mapping with that table and its user/timestamp columns chosen from the schema — the event can then be charted from existing data with zero code changes. Use EXACT table and column names from the schema. If no table records it, leave db_mapping fields as empty strings.
-- Always also provide instrumentation points (real files/functions from the code, with a one-line dotchart.track(userId, 'key', props) snippet) — even db-backed events benefit from live tracking later.
+- Always also provide instrumentation points (real files/functions from the code, with a one-line dotchart.track(userId, 'key', props) snippet) — even db-backed events benefit from live tracking later. Use an identifier actually in scope at that location; when none is, write dotchart.track(null, 'key', props) — the client resolves identity itself. Never invent identifiers or placeholder strings.
 - The instrumentation snippets must reference real code locations from the provided files.`
 
 /**

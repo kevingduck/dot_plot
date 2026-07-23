@@ -217,7 +217,7 @@ Principles:
 - Exactly one event should be the core value event; several may be "activation" (first-run/aha moments that predict retention) or "feature" (secondary features whose adoption might drive retention).
 - Propose 4-10 events total. Fewer, well-chosen events beat a long list.
 - Keys are snake_case verbs in past tense (created_playlist, exported_report).
-- Instrumentation points must reference real files and functions from the provided code, with a concrete one-line tracking call using dotchart.track(userId, 'event_key', props).
+- Instrumentation points must reference real files and functions from the provided code, with a concrete one-line tracking call using dotchart.track(userId, 'event_key', props). Use an identifier that is actually in scope at that location; when none is, write dotchart.track(null, 'event_key', props) — the client resolves identity itself. Never invent identifiers or placeholder strings.
 - If the codebase is a frontend-only or library project, still propose the events its END USERS would generate, instrumented at the closest real code location.`
 
 export async function scanCodebase(targetPath, { onStatus = () => {}, model, apiKey, provider, baseUrl, allowEnvKey } = {}) {

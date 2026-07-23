@@ -21,33 +21,54 @@ function git(repo, args, opts = {}) {
 
 function sdkTemplate(isTs, isCjs) {
   const types = isTs ? ': Record<string, unknown>' : ''
-  const sigTypes = isTs ? '(userId: string | number, event: string, props: Record<string, unknown> = {})' : '(userId, event, props = {})'
-  const decl = isCjs ? `function track${sigTypes}` : `export function track${sigTypes}`
-  const exports = isCjs ? `\nmodule.exports = { track }\n` : `\nexport default { track }\n`
+  const idType = isTs ? ': string | number | null | undefined' : ''
+  const sigTypes = isTs
+    ? '(userId: string | number | null | undefined, event: string, props: Record<string, unknown> = {})'
+    : '(userId, event, props = {})'
+  const declTrack = isCjs ? `function track${sigTypes}` : `export function track${sigTypes}`
+  const declIdentify = isCjs ? `function identify(userId${idType})` : `export function identify(userId${idType})`
+  const exports = isCjs ? `\nmodule.exports = { track, identify }\n` : `\nexport default { track, identify }\n`
   return `// DotChart tracking client. Safe no-op unless DOTCHART_INGEST_URL is set
 // (env var on the server, window.DOTCHART_INGEST_URL in the browser).
 // Fire-and-forget: never throws, never blocks, never breaks the host app.
+//
+// Identity is handled for you: pass a user id when one is in scope, or null
+// when it isn't. In the browser, null resolves to the identify()'d user —
+// call identify(user.id) once at login — or a stable per-visitor id, so every
+// person gets their own row either way.
 
-${decl} {
+let _uid${isTs ? ': string | null' : ''} = null
+
+/** Remember who the current user is (call once at login/session restore). */
+${declIdentify} {
+  try {
+    _uid = userId == null || userId === '' ? null : String(userId)
+    if (_uid && typeof localStorage !== 'undefined') localStorage.setItem('dotchart_uid', _uid)
+  } catch {
+    // analytics must never take the app down
+  }
+}
+
+${declTrack} {
   try {
     const url =
       (typeof process !== 'undefined' && process.env && process.env.DOTCHART_INGEST_URL) ||
       (typeof window !== 'undefined' && (window${isTs ? ' as unknown as { DOTCHART_INGEST_URL?: string }' : ''}).DOTCHART_INGEST_URL) ||
       ''
     if (!url || !event) return
-    // No real user id (app without accounts)? Use a stable per-browser id so
-    // each visitor gets their own row instead of one shared "anonymous".
-    if ((!userId || userId === 'anonymous') && typeof localStorage !== 'undefined') {
+    let id = userId == null || userId === '' || userId === 'anonymous' ? _uid : String(userId)
+    // Browser with no known user: stable per-visitor id, one row per person
+    if (!id && typeof localStorage !== 'undefined') {
       let uid = localStorage.getItem('dotchart_uid')
       if (!uid) {
         uid = 'anon_' + Math.random().toString(36).slice(2, 10)
         localStorage.setItem('dotchart_uid', uid)
       }
-      userId = uid
+      id = uid
     }
-    if (!userId) return
+    if (!id) return // server-side with no identity: nothing to attribute
     const payload${types} = {
-      user_id: String(userId),
+      user_id: String(id),
       event: event,
       timestamp: new Date().toISOString(),
       props: props,
@@ -121,7 +142,9 @@ Hard rules:
 - new_string must contain the same code with ONLY additions — never delete, reorder, or rewrite existing logic. Match the file's indentation, quote style, and semicolon conventions.
 - Insert the track call at the point where the action has SUCCEEDED (after the successful write/response, not before validation).
 - Each file that gains a track call also needs the import added once — do that as its own separate edit near the file's other imports (skip if the file already imports it).
-- Use the SDK exactly as: track(userId, 'event_key', { ...small useful props }). Derive userId from what's actually in scope in that code; if no user identifier is in scope, use the closest available (session id, account id) and say so in the explanation.
+- Use the SDK exactly as: track(userId, 'event_key', { ...small useful props }). Derive userId from what's actually PROVABLY in scope in that code. If no user identifier is in scope, pass null — the SDK resolves identity itself (an identify()'d user, else a stable per-browser visitor id). NEVER invent an identifier and NEVER pass a placeholder string like 'anonymous'.
+- If the codebase has an obvious login/session-restore success point among the provided files, add ONE extra edit there calling identify(<the user id in scope>) so anonymous visitors upgrade to their real id. Skip this if no such point is in the provided files.
+- In server-side code with no user identifier in scope, skip that location and explain why in notes (null-id events are dropped server-side by design).
 - CRITICAL: every identifier in the props object must be PROVABLY in scope at the exact insertion point (declared in the same function, an enclosing scope, or module level — check, don't assume). A single out-of-scope reference throws at runtime and silently kills the event. When any doubt exists, OMIT the prop — a track call with fewer props always beats one that crashes.
 - Only instrument the events and locations provided. If a location can't be instrumented safely, omit it and explain why in notes.
 - Never touch package.json, config files, or tests.`

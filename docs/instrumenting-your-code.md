@@ -33,6 +33,15 @@ the one-click flow above, or copy each event's snippet from the plan's
 
 ## The generated client
 
+**Identity is handled for you.** Where your code has a user id in scope,
+the tracking call uses it. Where it doesn't, the call passes `null` and
+the client resolves identity itself: in the browser every visitor gets a
+stable anonymous id (its own row on the grid), upgraded to the real user
+the moment your app calls `dotchart.identify(user.id)` at login — the
+proposal adds that call for you when a login point is in the scanned
+files. Server-side calls with no identity are dropped rather than
+mis-attributed.
+
 The `dotchart` client is a no-op until you set an environment variable in
 the instrumented app:
 
