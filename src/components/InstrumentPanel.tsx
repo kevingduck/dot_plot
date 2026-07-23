@@ -11,6 +11,7 @@ interface Props {
   events: PlannedEvent[] // accepted events only
   autoStart?: boolean // kick off the proposal immediately (user clicked Start tracking)
   ingestPath?: string // '/ingest' or '/ingest/<project token>' in account mode
+  liveCount?: number // events received for this project — powers the first-event celebration
 }
 
 /** Highlight lines in new_string that aren't in old_string (edits are additive). */
@@ -41,8 +42,9 @@ function Diff({ edit }: { edit: PreparedEdit }) {
 /** Hosted DotChart can only edit repos it cloned itself (GitHub connects — legacy shared dir or per-account dir). */
 const isServerRepo = (p: string) => /\/\.dotchart\/(users\/[^/]+\/)?repos\//.test(p)
 
-export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '/ingest' }: Props) {
+export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '/ingest', liveCount }: Props) {
   const hosted = getAppMode().hosted
+  const ghAccess = getAppMode().githubRepoAccess ?? false
   const [phase, setPhase] = useState<Phase>('idle')
   const [path, setPath] = useState(defaultPath)
   const [status, setStatus] = useState('')
@@ -53,6 +55,7 @@ export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '
   const [sdkOpen, setSdkOpen] = useState(false)
   const [pushToken, setPushToken] = useState('')
   const [result, setResult] = useState<InstrumentResult | null>(null)
+  const celebrateBaseline = useRef(0)
   const canEditHere = !hosted || isServerRepo(path)
 
   const startedRef = useRef(false)
@@ -88,8 +91,10 @@ export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '
         path: path.trim(),
         sdkFile: includeSdk ? prep.sdk_file : undefined,
         edits: prep.edits.filter((e) => selected.has(e.id)),
-        pushToken: hosted ? pushToken.trim() : undefined,
+        pushToken: hosted && pushToken.trim() ? pushToken.trim() : undefined,
+        ingestUrl: `${window.location.origin}${ingestPath}`,
       })
+      celebrateBaseline.current = liveCount ?? 0
       setResult(r)
       setPhase('done')
     } catch (err) {
@@ -142,6 +147,11 @@ export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '
     return (
       <div className="instrument-wrap">
         <div className="instrument-done">
+          {(liveCount ?? 0) > celebrateBaseline.current && (
+            <div className="first-event-banner" role="status">
+              🎉 Events are flowing — {liveCount} received. Scroll up: your users are on the grid.
+            </div>
+          )}
           <div className="instrument-done-title">✓ Branch created — your working branch was not touched</div>
           <p>
             <code>{result.branch}</code> (commit <code>{result.commit}</code>) now sits alongside{' '}
@@ -250,13 +260,13 @@ DOTCHART_INGEST_URL=${ingestUrl}
             <button
               className="btn btn-primary"
               onClick={apply}
-              disabled={(selected.size === 0 && !includeSdk) || (hosted && !pushToken.trim())}
-              title={hosted && !pushToken.trim() ? 'Paste a GitHub token below first' : undefined}
+              disabled={(selected.size === 0 && !includeSdk) || (hosted && !ghAccess && !pushToken.trim())}
+              title={hosted && !ghAccess && !pushToken.trim() ? 'Paste a GitHub token below first' : undefined}
             >
               {hosted ? 'Create branch & push to GitHub' : `Create branch with ${selected.size + (includeSdk ? 1 : 0)} change${selected.size + (includeSdk ? 1 : 0) === 1 ? '' : 's'}`}
             </button>
           </div>
-          {hosted && (
+          {hosted && !ghAccess && (
             <div className="wizard-keyrow instrument-token">
               <input
                 type="password"
@@ -268,6 +278,9 @@ DOTCHART_INGEST_URL=${ingestUrl}
                 autoComplete="off"
               />
             </div>
+          )}
+          {hosted && ghAccess && (
+            <p className="scan-hint">The push uses your connected GitHub account — no token needed.</p>
           )}
           {prep.notes && <p className="scan-hint">Reviewer notes from Claude: {prep.notes}</p>}
 

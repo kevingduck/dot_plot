@@ -141,6 +141,71 @@ function adoptLegacyData(user, userCount) {
   }
 }
 
+// ---- free analyses (DOTCHART_FREE_ANALYSES) ----
+// Non-owner accounts may run N analyses on the server's API key before
+// bringing their own. Peek with freeAnalysesLeft, burn with consumeFree.
+
+export function freeAnalysesLeft(userId, limit) {
+  if (!limit) return 0
+  const user = readUsers().find((u) => u.id === userId)
+  return user ? Math.max(0, limit - (user.free_used ?? 0)) : 0
+}
+
+export function consumeFreeAnalysis(userId, limit) {
+  const users = readUsers()
+  const user = users.find((u) => u.id === userId)
+  if (!user) return false
+  if ((user.free_used ?? 0) >= limit) return false
+  user.free_used = (user.free_used ?? 0) + 1
+  writeUsers(users)
+  return true
+}
+
+// ---- GitHub repo access token (OAuth `repo` scope, encrypted at rest) ----
+
+function encryptToken(text) {
+  const iv = crypto.randomBytes(12)
+  const key = crypto.createHash('sha256').update(secret()).digest()
+  const c = crypto.createCipheriv('aes-256-gcm', key, iv)
+  const enc = Buffer.concat([c.update(text, 'utf8'), c.final()])
+  return [iv.toString('hex'), c.getAuthTag().toString('hex'), enc.toString('hex')].join('.')
+}
+
+function decryptToken(blob) {
+  try {
+    const [iv, tag, data] = String(blob).split('.')
+    const key = crypto.createHash('sha256').update(secret()).digest()
+    const d = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'hex'))
+    d.setAuthTag(Buffer.from(tag, 'hex'))
+    return Buffer.concat([d.update(Buffer.from(data, 'hex')), d.final()]).toString('utf8')
+  } catch {
+    return null
+  }
+}
+
+export function saveGithubToken(userId, token) {
+  const users = readUsers()
+  const user = users.find((u) => u.id === userId)
+  if (!user) return
+  user.github_token_enc = encryptToken(token)
+  writeUsers(users)
+}
+
+export function getGithubToken(userId) {
+  const user = readUsers().find((u) => u.id === userId)
+  return user?.github_token_enc ? decryptToken(user.github_token_enc) : null
+}
+
+/** Attach a GitHub identity (and optionally its token) to an EXISTING logged-in account. */
+export function linkGithub(userId, ghId, token) {
+  const users = readUsers()
+  const user = users.find((u) => u.id === userId)
+  if (!user) return
+  user.github_id = ghId
+  if (token) user.github_token_enc = encryptToken(token)
+  writeUsers(users)
+}
+
 // ---- password reset ----
 // Email delivery via Resend (RESEND_API_KEY + optional RESEND_FROM). The
 // reset link carries an HMAC-signed one-hour token bound to the user's

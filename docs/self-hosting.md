@@ -40,9 +40,14 @@ DOTCHART_HOSTED=1 DOTCHART_PASSWORD=… ANTHROPIC_API_KEY=… npm start
   one is generated and persisted if unset — fine on a single instance
   with a disk).
 - `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` — optional: enables
-  "Continue with GitHub" on the login screen. Register an OAuth app at
-  github.com → Settings → Developer settings with callback URL
-  `https://your-host/api/auth/github/callback`.
+  "Continue with GitHub" on the login screen AND the repo picker ("Pick
+  from your GitHub repos" — one-click connect of private repos and
+  tokenless branch pushes; the OAuth token is stored encrypted). Register
+  an OAuth app at github.com → Settings → Developer settings with
+  callback URL `https://your-host/api/auth/github/callback`.
+- `DOTCHART_FREE_ANALYSES` — optional: each new account may run this many
+  AI analyses on the server's key before bringing their own (default 0).
+  A credit is only consumed when the server key is actually used.
 - `RESEND_API_KEY` (+ optional `RESEND_FROM`) — optional: enables
   "Forgot password?" reset emails via [resend.com](https://resend.com).
   Without it, reset an account from the server shell:

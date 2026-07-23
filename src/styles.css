@@ -1302,6 +1302,33 @@ button.picker-row:hover {
 .instrument-token {
   margin: 8px 0;
 }
+.first-event-banner {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border: 1px solid #0ca30c;
+  border-radius: 8px;
+  background: color-mix(in srgb, #0ca30c 10%, transparent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.repo-list {
+  margin-top: 8px;
+}
+.repo-name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  padding: 4px 0;
+}
+.repo-desc {
+  color: var(--text-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .instrument-options {
   margin: 4px 0;
   padding-left: 20px;

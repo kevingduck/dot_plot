@@ -9,7 +9,8 @@ On a DotChart with accounts, every project has its **own** ingest URL —
 `POST /ingest/<token>` — shown in the app wherever the ingest URL appears
 (the waiting screen, the instrumentation done screen). Events sent there
 land in that project only, no matter what the events are named. On a
-single-user DotChart it's simply `POST /ingest`.
+single-user DotChart it's simply `POST /ingest`. Leaked a token? **Data ▾
+→ Rotate ingest URL** issues a new one and kills the old immediately.
 
 ## Point your app at it
 

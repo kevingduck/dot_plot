@@ -9,7 +9,9 @@ export interface AppMode {
   authMode?: boolean
   user?: { email: string } | null
   githubOauth?: boolean
+  githubRepoAccess?: boolean
   emailEnabled?: boolean
+  freeAnalyses?: number | null
   hasServerKey: boolean
   serverKeys?: { anthropic: boolean; openai: boolean }
 }

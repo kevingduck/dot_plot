@@ -117,8 +117,17 @@ export default function App() {
   const datasetRef = useRef<Dataset>(dataset)
   datasetRef.current = dataset
   const [importError, setImportError] = useState<string | null>(null)
-  const [wizardOpen, setWizardOpen] = useState(() => persisted === null)
+  const [wizardOpen, setWizardOpen] = useState(
+    () => persisted === null || new URLSearchParams(window.location.search).get('github') === 'connected',
+  )
   const [demoPreview, setDemoPreview] = useState(false) // anonymous look-around with sample data (account mode)
+
+  // Clean the ?github=connected marker once the wizard has read it
+  useEffect(() => {
+    if (window.location.search.includes('github=connected')) {
+      window.history.replaceState(null, '', window.location.pathname)
+    }
+  }, [])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [appMode, setAppMode] = useState<AppMode>({ hosted: false, authRequired: false, hasServerKey: true })
   const [modeReady, setModeReady] = useState(false)
@@ -687,6 +696,23 @@ export default function App() {
                 >
                   Load demo data (fictional music app)
                 </button>
+                {appMode.authMode && activeSlug && ingestToken && (
+                  <button
+                    role="menuitem"
+                    title="Generates a new ingest URL for this project — the old URL stops accepting events immediately"
+                    onClick={async () => {
+                      setDataMenuOpen(false)
+                      try {
+                        const r = await postJson<{ ingest_token: string }>('/api/projects/rotate-token', { slug: activeSlug })
+                        setIngestToken(r.ingest_token)
+                      } catch (err) {
+                        setImportError(err instanceof Error ? err.message : String(err))
+                      }
+                    }}
+                  >
+                    Rotate ingest URL (old one stops working)
+                  </button>
+                )}
                 {liveCount > 0 && !confirmClear && (
                   <button role="menuitem" onClick={() => setConfirmClear(true)}>
                     Clear tracked events ({liveCount})…
@@ -870,6 +896,7 @@ export default function App() {
           key={`${plan.meta?.generated_at ?? ''}:${plan.events.map((e) => e.key).join(',')}`}
           plan={plan}
           ingestPath={ingestPath}
+          liveCount={liveCount}
           datasetEvents={datasetEventNames}
           datasetIsDemo={dataset.source.startsWith('Sample data') && !dataset.source.includes(' + live')}
           onApply={applyPlan}

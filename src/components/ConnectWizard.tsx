@@ -5,7 +5,14 @@ import { PROVIDERS, addRecent, aiParams, getRecents, getSettings, saveSettings, 
 import { browserOllamaActive, runBrowserOllamaTask } from '../lib/ai'
 import { probeOllama, type OllamaProbe } from '../lib/ollamaClient'
 import { digestFromFileList, pickLocalFolder, type LocalDigest } from '../lib/localdigest'
+import { getAppMode } from '../lib/mode'
 import { DbPanel } from './DbPanel'
+
+interface GithubRepo {
+  full_name: string
+  private: boolean
+  description: string
+}
 
 type Phase = 'pick' | 'cloning' | 'discovering' | 'discovered' | 'analyzing' | 'review' | 'importing'
 
@@ -105,9 +112,25 @@ function FolderPicker({ onSelect, disabled }: { onSelect: (path: string) => void
 
 export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImport, onImportCsv, onImportPlanFile, onDemo, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>('pick')
-  const [tab, setTab] = useState<'local' | 'github'>('local')
+  // Arriving back from the GitHub repo-access authorize? Land on that tab.
+  const [tab, setTab] = useState<'local' | 'github'>(() =>
+    new URLSearchParams(window.location.search).get('github') ? 'github' : 'local',
+  )
   const [ghUrl, setGhUrl] = useState('')
   const [ghToken, setGhToken] = useState('')
+  const [repos, setRepos] = useState<GithubRepo[] | null>(null)
+  const [repoFilter, setRepoFilter] = useState('')
+  const ghAccess = getAppMode().githubRepoAccess ?? false
+
+  useEffect(() => {
+    if (tab === 'github' && ghAccess && repos === null) {
+      postJson<{ repos: GithubRepo[] }>('/api/github/repos', {}).then(
+        (r) => setRepos(r.repos),
+        (e) => setError(e instanceof Error ? e.message : String(e)),
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, ghAccess])
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState('')
   const [project, setProject] = useState<DiscoveredProject | null>(null)
@@ -216,11 +239,15 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
     }
   }
 
-  const cloneGithub = async () => {
+  const cloneGithub = async (url?: string) => {
     setPhase('cloning')
     setError(null)
     try {
-      const r = await postNdjson<{ path: string }>('/api/github/clone', { url: ghUrl.trim(), token: ghToken.trim() || undefined }, setStatus)
+      const r = await postNdjson<{ path: string }>(
+        '/api/github/clone',
+        { url: (url ?? ghUrl).trim(), token: ghToken.trim() || undefined },
+        setStatus,
+      )
       setGhToken('')
       await discover(r.path)
     } catch (err) {
@@ -348,6 +375,55 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
 
           {tab === 'github' && (
             <div className="wizard-github">
+              {getAppMode().githubOauth && !ghAccess && (
+                <>
+                  <a className="btn btn-primary" href="/api/auth/github?scope=repo">
+                    🔗 Pick from your GitHub repos
+                  </a>
+                  <div className="scan-hint">
+                    Authorize once — then connecting is one click from a list of your repos, private ones included, and
+                    tracking branches push back without any tokens. Or paste a URL below.
+                  </div>
+                  <div className="scan-divider" />
+                </>
+              )}
+              {ghAccess && (
+                <>
+                  <input
+                    type="search"
+                    className="scan-path"
+                    placeholder="Find one of your repos…"
+                    value={repoFilter}
+                    onChange={(e) => setRepoFilter(e.target.value)}
+                    aria-label="Filter repositories"
+                    disabled={phase !== 'pick'}
+                  />
+                  <div className="picker-list repo-list">
+                    {repos === null && <div className="scan-hint picker-empty">Loading your repositories…</div>}
+                    {repos
+                      ?.filter((r) => r.full_name.toLowerCase().includes(repoFilter.toLowerCase()))
+                      .slice(0, 8)
+                      .map((r) => (
+                        <div className="picker-row" key={r.full_name}>
+                          <span className="repo-name">
+                            {r.full_name}
+                            {r.private && <span className="picker-badge">private</span>}
+                            {r.description && <span className="repo-desc">{r.description}</span>}
+                          </span>
+                          <button
+                            className="btn btn-primary picker-choose"
+                            onClick={() => cloneGithub(`https://github.com/${r.full_name}`)}
+                            disabled={phase !== 'pick'}
+                          >
+                            Connect
+                          </button>
+                        </div>
+                      ))}
+                    {repos !== null && repos.length === 0 && <div className="scan-hint picker-empty">No repositories found.</div>}
+                  </div>
+                  <div className="scan-divider" />
+                </>
+              )}
               <input
                 type="text"
                 className="scan-path"
@@ -372,7 +448,7 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
                 stored (private repos: github.com → Settings → Developer settings → Fine-grained tokens → read-only
                 access to the repo).
               </div>
-              <button className="btn btn-primary" onClick={cloneGithub} disabled={!ghUrl.trim() || phase !== 'pick'}>
+              <button className="btn btn-primary" onClick={() => cloneGithub()} disabled={!ghUrl.trim() || phase !== 'pick'}>
                 {phase === 'cloning' ? 'Downloading…' : 'Connect repo'}
               </button>
             </div>
@@ -571,7 +647,11 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
             </button>
             {aiReady && (
               <span className="scan-hint">
-                AI: {aiCfg.provider === 'ollama' ? `${aiCfg.models.ollama} (local)` : aiCfg.models[aiCfg.provider]} — change in ⚙ Settings
+                AI: {aiCfg.provider === 'ollama' ? `${aiCfg.models.ollama} (local)` : aiCfg.models[aiCfg.provider]}
+                {aiCfg.provider !== 'ollama' && !aiCfg.keys[aiCfg.provider] && (getAppMode().freeAnalyses ?? null) !== null
+                  ? ` · ${getAppMode().freeAnalyses} free ${getAppMode().freeAnalyses === 1 ? 'analysis' : 'analyses'} left`
+                  : ''}{' '}
+                — change in ⚙ Settings
               </span>
             )}
           </div>

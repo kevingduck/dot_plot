@@ -15,6 +15,7 @@ const TIER_LABEL: Record<EventTier, string> = {
 interface Props {
   plan: EventPlan
   ingestPath?: string // '/ingest' or '/ingest/<project token>' in account mode
+  liveCount?: number
   datasetEvents: Set<string>
   datasetIsDemo: boolean
   onApply: (accepted: { key: string; label: string }[], coreKey: string) => void
@@ -42,7 +43,7 @@ function guessMatch(planKey: string, datasetNames: string[]): string {
   return bestScore >= 2 ? best : ''
 }
 
-export function EventPlanPanel({ plan, ingestPath = '/ingest', datasetEvents, datasetIsDemo, onApply, onClose }: Props) {
+export function EventPlanPanel({ plan, ingestPath = '/ingest', liveCount, datasetEvents, datasetIsDemo, onApply, onClose }: Props) {
   const [accepted, setAccepted] = useState<Set<string>>(
     () => new Set(plan.events.filter((e) => e.tier !== 'noise').map((e) => e.key)),
   )
@@ -233,6 +234,7 @@ export function EventPlanPanel({ plan, ingestPath = '/ingest', datasetEvents, da
               autoStart
               defaultPath={plan.meta?.scanned_path ?? ''}
               ingestPath={ingestPath}
+              liveCount={liveCount}
               events={plan.events.filter((e) => accepted.has(e.key))}
             />
           )}

@@ -31,6 +31,28 @@ function assertHostedPathAllowed(hosted, targetPath, allowedRoot) {
   }
 }
 
+// Sliding-window rate limiter (in-memory; per instance). Keys are
+// "<bucket>:<ip>"; prunes itself when it grows.
+const rateHits = new Map()
+function rateLimit(key, max, windowMs) {
+  const now = Date.now()
+  if (rateHits.size > 10_000) {
+    for (const [k, v] of rateHits) if (now > v.reset) rateHits.delete(k)
+  }
+  const h = rateHits.get(key)
+  if (!h || now > h.reset) {
+    rateHits.set(key, { count: 1, reset: now + windowMs })
+    return true
+  }
+  if (h.count >= max) return false
+  h.count++
+  return true
+}
+
+function clientIp(req) {
+  return String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || req.socket?.remoteAddress || 'unknown'
+}
+
 export function createApiHandler({ log = () => {}, hosted = false, password = '', authMode = false } = {}) {
   const readBody = (req) =>
     new Promise((resolve, reject) => {
@@ -94,17 +116,31 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     res.end()
   }
 
-  /** In account mode the server's env API keys are reserved for the instance owner (first account). */
-  const allowEnvKeyFor = async (ctx) => {
+  /**
+   * Server env API keys belong to the instance owner (first account); other
+   * accounts may burn DOTCHART_FREE_ANALYSES of them, then bring their own.
+   * Consumes a credit only when the request would actually use the env key.
+   */
+  const freeLimit = () => Math.max(0, Number(process.env.DOTCHART_FREE_ANALYSES || 0) || 0)
+
+  const allowEnvKeyFor = async (ctx, body) => {
     if (!authMode) return true
     if (!ctx?.user) return false
-    const { firstUserId } = await import('./auth.mjs')
-    return ctx.user.id === firstUserId()
+    const { firstUserId, consumeFreeAnalysis } = await import('./auth.mjs')
+    if (ctx.user.id === firstUserId()) return true
+    if (body?.apiKey || body?.provider === 'ollama') return false // env key not needed — don't burn a credit
+    return freeLimit() > 0 && consumeFreeAnalysis(ctx.user.id, freeLimit())
   }
 
   const effectiveServerKeys = async (ctx) => {
     const { serverKeys } = await import('./llm.mjs')
-    return (await allowEnvKeyFor(ctx)) ? serverKeys() : { anthropic: false, openai: false }
+    if (!authMode) return { ...serverKeys(), freeAnalyses: null }
+    if (!ctx?.user) return { anthropic: false, openai: false, freeAnalyses: null }
+    const { firstUserId, freeAnalysesLeft } = await import('./auth.mjs')
+    if (ctx.user.id === firstUserId()) return { ...serverKeys(), freeAnalyses: null }
+    const left = freeAnalysesLeft(ctx.user.id, freeLimit())
+    const real = serverKeys()
+    return { anthropic: real.anthropic && left > 0, openai: real.openai && left > 0, freeAnalyses: left }
   }
 
   /** GitHub clones are namespaced per account — one user's private repo must not be reachable by another. */
@@ -131,8 +167,10 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
         user: ctx?.user ? { email: ctx.user.email } : null,
         githubOauth: authMode && Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
         emailEnabled: authMode && Boolean(process.env.RESEND_API_KEY),
+        githubRepoAccess: authMode && ctx?.user ? Boolean((await import('./auth.mjs')).getGithubToken(ctx.user.id)) : false,
         hasServerKey: keys.anthropic,
-        serverKeys: keys,
+        serverKeys: { anthropic: keys.anthropic, openai: keys.openai },
+        freeAnalyses: keys.freeAnalyses ?? null,
       }
     }),
 
@@ -172,7 +210,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
 
     '/api/keycheck': json(async (_body, ctx) => {
       const keys = await effectiveServerKeys(ctx)
-      return { hasServerKey: keys.anthropic, serverKeys: keys }
+      return { hasServerKey: keys.anthropic, serverKeys: { anthropic: keys.anthropic, openai: keys.openai }, freeAnalyses: keys.freeAnalyses ?? null }
     }),
 
     // Validate a provider config without a paid call: key check for
@@ -240,7 +278,31 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     '/api/github/clone': ndjson(async (body, onStatus, ctx) => {
       if (!body.url) throw new Error('Body must be {"url": "https://github.com/owner/repo"}')
       const { cloneGithubRepo } = await import('./connect.mjs')
-      return cloneGithubRepo(body.url, body.token || undefined, { onStatus, destRoot: await reposRootFor(ctx) })
+      let token = body.token || undefined
+      if (!token && authMode && ctx?.user) token = (await import('./auth.mjs')).getGithubToken(ctx.user.id) || undefined
+      return cloneGithubRepo(body.url, token, { onStatus, destRoot: await reposRootFor(ctx) })
+    }),
+
+    // Repo picker: list the user's GitHub repos via their stored OAuth token
+    '/api/github/repos': json(async (_body, ctx) => {
+      if (!authMode || !ctx?.user) throw new Error('Log in first')
+      const { getGithubToken } = await import('./auth.mjs')
+      const token = getGithubToken(ctx.user.id)
+      if (!token) throw new Error('GitHub is not connected — click "Pick from your GitHub" to authorize')
+      const res = await fetch('https://api.github.com/user/repos?sort=pushed&per_page=100', {
+        headers: { authorization: `Bearer ${token}`, 'user-agent': 'dotchart' },
+      })
+      if (res.status === 401) throw new Error('GitHub access expired — reconnect your GitHub account')
+      if (!res.ok) throw new Error(`GitHub returned ${res.status}`)
+      const repos = await res.json()
+      return {
+        repos: (Array.isArray(repos) ? repos : []).map((r) => ({
+          full_name: r.full_name,
+          private: Boolean(r.private),
+          pushed_at: r.pushed_at,
+          description: r.description ?? '',
+        })),
+      }
     }),
 
     '/api/connect/discover': json(async (body, ctx) => {
@@ -253,7 +315,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     '/api/connect/analyze': ndjson(async (body, onStatus, ctx) => {
       const { analyzeProject } = await import('./connect.mjs')
       const { path: targetPath, connectionString, model, apiKey, provider, baseUrl, digest } = body
-      const aiOpts = { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: await allowEnvKeyFor(ctx) }
+      const aiOpts = { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: await allowEnvKeyFor(ctx, body) }
       if (digest) {
         // Browser-side digest (hosted local-folder flow)
         if (!digest.name || typeof digest.digest !== 'string' || !digest.digest) {
@@ -273,7 +335,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       }
       assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
       const { prepareInstrumentation } = await import('./instrument.mjs')
-      const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: await allowEnvKeyFor(ctx) })
+      const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: await allowEnvKeyFor(ctx, body) })
       onStatus(`Prepared ${prep.edits.length} edits (${prep.edits.filter((e) => e.status === 'ok').length} clean)`)
       return prep
     }),
@@ -286,15 +348,17 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
         // Hosted CAN create branches for GitHub-connected projects: the clone
         // lives on this server; the branch is pushed with a one-time token.
         assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
-        if (!pushToken) {
+        let token = pushToken
+        if (!token && authMode && ctx?.user) token = (await import('./auth.mjs')).getGithubToken(ctx.user.id)
+        if (!token) {
           throw new Error('A GitHub token with write access to the repo is needed to push the branch (used once, never stored)')
         }
-        const result = applyInstrumentation(targetPath, { sdkFile, edits })
-        const { compareUrl } = pushBranch(targetPath, result.branch, result.baseBranch, pushToken)
+        const result = applyInstrumentation(targetPath, { sdkFile, edits, ingestUrl: body.ingestUrl })
+        const { compareUrl } = pushBranch(targetPath, result.branch, result.baseBranch, token)
         log(`Instrumentation branch ${result.branch} pushed to GitHub (${result.applied.length} edits)`)
         return { ...result, pushed: true, compareUrl }
       }
-      const result = applyInstrumentation(targetPath, { sdkFile, edits })
+      const result = applyInstrumentation(targetPath, { sdkFile, edits, ingestUrl: body.ingestUrl })
       log(`Instrumentation branch ${result.branch} created (${result.applied.length} edits, base ${result.baseBranch})`)
       return result
     }),
@@ -333,6 +397,17 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       const { loadWorkspace } = await import('./projects.mjs')
       return loadWorkspace(String(body.slug ?? ''), await projectsDirOf(ctx))
     }),
+    '/api/projects/rotate-token': json(async (body, ctx) => {
+      const { loadWorkspace, saveWorkspace } = await import('./projects.mjs')
+      const dir = await projectsDirOf(ctx)
+      const ws = loadWorkspace(String(body.slug ?? ''), dir)
+      const crypto = await import('node:crypto')
+      ws.ingest_token = crypto.default.randomBytes(12).toString('hex')
+      const out = saveWorkspace(ws, dir)
+      if (authMode) (await import('./auth.mjs')).invalidateTokenCache()
+      log('ingest token rotated')
+      return out
+    }),
     '/api/projects/delete': json(async (body, ctx) => {
       const { deleteWorkspace } = await import('./projects.mjs')
       deleteWorkspace(String(body.slug ?? ''), await projectsDirOf(ctx))
@@ -342,7 +417,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     '/api/insights': json(async (body, ctx) => {
       if (!body.summary) throw new Error('Body must include a usage summary')
       const { findInsights } = await import('./insights.mjs')
-      const out = await findInsights(body.summary, { model: body.model, apiKey: body.apiKey, provider: body.provider, baseUrl: body.baseUrl, allowEnvKey: await allowEnvKeyFor(ctx) })
+      const out = await findInsights(body.summary, { model: body.model, apiKey: body.apiKey, provider: body.provider, baseUrl: body.baseUrl, allowEnvKey: await allowEnvKeyFor(ctx, body) })
       log(`insights: ${out.insights.length} found (${out.meta.usage.input_tokens} in / ${out.meta.usage.output_tokens} out tokens)`)
       return out
     }),
@@ -395,13 +470,31 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       if (!targetPath || typeof targetPath !== 'string') throw new Error('Body must be {"path": "/path/to/codebase"}')
       assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
       const { scanCodebase } = await import('./scan.mjs')
-      return scanCodebase(targetPath, { model, apiKey, provider, baseUrl, onStatus, allowEnvKey: await allowEnvKeyFor(ctx) })
+      return scanCodebase(targetPath, { model, apiKey, provider, baseUrl, onStatus, allowEnvKey: await allowEnvKeyFor(ctx, body) })
     }),
   }
 
   /** Handle the request if it's ours; returns true when handled. */
   return async function handle(req, res) {
     const url = (req.url ?? '').split('?')[0]
+
+    // Brute-force / abuse throttles (cheap, before any work)
+    if (/^\/api\/auth\/(signup|login|forgot|reset)$/.test(url) && req.method === 'POST') {
+      if (!rateLimit(`auth:${clientIp(req)}`, 12, 60_000)) {
+        res.statusCode = 429
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: 'Too many attempts — wait a minute and try again' }))
+        return true
+      }
+    }
+    if (url === '/ingest' || url.startsWith('/ingest/')) {
+      if (req.method === 'POST' && !rateLimit(`ingest:${clientIp(req)}`, 240, 60_000)) {
+        res.statusCode = 429
+        res.setHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ error: 'Rate limited — max 240 ingest requests/minute per source (batch your events)' }))
+        return true
+      }
+    }
 
     // Account mode: resolve the session before anything else
     let user = null
@@ -413,7 +506,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
 
     // GitHub OAuth (GET redirects; only when accounts + env creds exist)
     if (authMode && req.method === 'GET' && (url === '/api/auth/github' || url === '/api/auth/github/callback')) {
-      await handleGithubOauth(url, req, res, log)
+      await handleGithubOauth(url, req, res, log, user)
       return true
     }
 
@@ -524,8 +617,13 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
   }
 }
 
-/** GitHub OAuth: /api/auth/github redirects out; /callback exchanges the code. */
-async function handleGithubOauth(url, req, res, log) {
+/**
+ * GitHub OAuth. /api/auth/github redirects out (add ?scope=repo for the
+ * repo-picker upgrade — the token is then stored, encrypted, for clone/push);
+ * /callback exchanges the code. A logged-in user gets GitHub LINKED to their
+ * existing account; an anonymous visitor gets logged in / signed up.
+ */
+async function handleGithubOauth(url, req, res, log, sessionUser) {
   const clientId = process.env.GITHUB_CLIENT_ID
   const clientSecret = process.env.GITHUB_CLIENT_SECRET
   if (!clientId || !clientSecret) {
@@ -538,12 +636,16 @@ async function handleGithubOauth(url, req, res, log) {
   const origin = `${proto}://${req.headers.host}`
 
   if (url === '/api/auth/github') {
+    const wantRepo = new URLSearchParams((req.url ?? '').split('?')[1] ?? '').get('scope') === 'repo'
     const state = crypto.default.randomBytes(16).toString('hex')
-    res.setHeader('set-cookie', `dotchart_oauth_state=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`)
+    res.setHeader('set-cookie', [
+      `dotchart_oauth_state=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`,
+      `dotchart_oauth_repo=${wantRepo ? '1' : ''}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`,
+    ])
     const q = new URLSearchParams({
       client_id: clientId,
       redirect_uri: `${origin}/api/auth/github/callback`,
-      scope: 'user:email',
+      scope: wantRepo ? 'repo user:email' : 'user:email',
       state,
     })
     res.statusCode = 302
@@ -575,12 +677,22 @@ async function handleGithubOauth(url, req, res, log) {
       const emails = await gh('/user/emails')
       email = (Array.isArray(emails) && (emails.find((e) => e.primary)?.email ?? emails[0]?.email)) || ''
     }
-    const { githubLogin, sessionCookie } = await import('./auth.mjs')
-    const user = githubLogin(String(ghUser.id), email)
-    log(`github login: ${user.email}`)
+    const { githubLogin, linkGithub, saveGithubToken, sessionCookie } = await import('./auth.mjs')
+    const wantRepo = /(?:^|;\s*)dotchart_oauth_repo=1/.test(String(req.headers.cookie ?? ''))
+    let user
+    if (sessionUser) {
+      // Already logged in: attach GitHub (and the repo token) to THIS account
+      linkGithub(sessionUser.id, String(ghUser.id), wantRepo ? token : undefined)
+      user = sessionUser
+      log(`github linked to ${user.email}${wantRepo ? ' (repo access)' : ''}`)
+    } else {
+      user = githubLogin(String(ghUser.id), email)
+      if (wantRepo) saveGithubToken(user.id, token)
+      log(`github login: ${user.email}${wantRepo ? ' (repo access)' : ''}`)
+    }
     res.statusCode = 302
-    res.setHeader('set-cookie', [sessionCookie(user.id), 'dotchart_oauth_state=; Path=/; Max-Age=0'])
-    res.setHeader('location', '/')
+    res.setHeader('set-cookie', [sessionCookie(user.id), 'dotchart_oauth_state=; Path=/; Max-Age=0', 'dotchart_oauth_repo=; Path=/; Max-Age=0'])
+    res.setHeader('location', wantRepo ? '/?github=connected' : '/')
     res.end()
   } catch (err) {
     res.statusCode = 400
