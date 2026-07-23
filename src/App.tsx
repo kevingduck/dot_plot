@@ -611,7 +611,12 @@ export default function App() {
           <span className="brand-tag">see what your users are actually doing</span>
         </div>
         <div className="topbar-actions">
-          <button className="btn btn-primary" onClick={() => setWizardOpen(!wizardOpen)} aria-expanded={wizardOpen}>
+          <button
+            className="btn btn-primary"
+            onClick={() => (demoPreview ? window.location.reload() : setWizardOpen(!wizardOpen))}
+            aria-expanded={wizardOpen}
+            title={demoPreview ? 'Sign up to connect your own project' : undefined}
+          >
             Connect project
           </button>
           {plan && (
@@ -789,6 +794,7 @@ export default function App() {
         )}
       </div>
 
+      {demoPreview ? null : (
       <OnboardingChecklist
         storageSuffix={appMode.user?.email}
         flags={{
@@ -805,10 +811,11 @@ export default function App() {
         onConnect={() => setWizardOpen(true)}
         onHelp={(slug) => window.open(`/docs/${slug}`, '_blank')}
       />
+      )}
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
 
-      {wizardOpen && modeReady && (
+      {wizardOpen && modeReady && !demoPreview && (
         <ConnectWizard
           hosted={appMode.hosted}
           serverKeys={appMode.serverKeys ?? { anthropic: appMode.hasServerKey, openai: false }}
