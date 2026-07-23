@@ -23,11 +23,11 @@ function reposRoot() {
   return path.join(os.homedir(), '.dotchart', 'repos')
 }
 
-function assertHostedPathAllowed(hosted, targetPath) {
+function assertHostedPathAllowed(hosted, targetPath, allowedRoot) {
   if (!hosted) return
   const resolved = path.resolve(String(targetPath ?? ''))
-  if (!resolved.startsWith(reposRoot() + path.sep)) {
-    throw new Error('Hosted mode can only analyze repositories connected via GitHub')
+  if (!resolved.startsWith((allowedRoot ?? reposRoot()) + path.sep)) {
+    throw new Error('Hosted mode can only work on repositories YOU connected via GitHub')
   }
 }
 
@@ -107,6 +107,13 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     return (await allowEnvKeyFor(ctx)) ? serverKeys() : { anthropic: false, openai: false }
   }
 
+  /** GitHub clones are namespaced per account — one user's private repo must not be reachable by another. */
+  const reposRootFor = async (ctx) => {
+    if (!authMode || !ctx?.user) return reposRoot()
+    const { userRoot } = await import('./auth.mjs')
+    return path.join(userRoot(ctx.user.id), 'repos')
+  }
+
   /** Workspace dir for this request: the user's own in account mode, legacy otherwise. */
   const projectsDirOf = async (ctx) => {
     if (!authMode || !ctx?.user) return undefined // module default (legacy shared dir)
@@ -123,6 +130,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
         authMode,
         user: ctx?.user ? { email: ctx.user.email } : null,
         githubOauth: authMode && Boolean(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
+        emailEnabled: authMode && Boolean(process.env.RESEND_API_KEY),
         hasServerKey: keys.anthropic,
         serverKeys: keys,
       }
@@ -147,6 +155,21 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       return { ok: true, _setCookie: clearSessionCookie() }
     }),
 
+    '/api/auth/forgot': json(async (body, ctx) => {
+      if (!authMode) throw new Error('Accounts are not enabled on this DotChart')
+      const { requestPasswordReset } = await import('./auth.mjs')
+      const proto = ctx?.req?.headers['x-forwarded-proto'] ?? 'http'
+      await requestPasswordReset(body.email, `${proto}://${ctx?.req?.headers.host}`)
+      return { ok: true } // same response whether or not the email exists
+    }),
+
+    '/api/auth/reset': json(async (body) => {
+      if (!authMode) throw new Error('Accounts are not enabled on this DotChart')
+      const { resetPassword, sessionCookie } = await import('./auth.mjs')
+      const user = resetPassword(body.token, body.password)
+      return { user, _setCookie: sessionCookie(user.id) }
+    }),
+
     '/api/keycheck': json(async (_body, ctx) => {
       const keys = await effectiveServerKeys(ctx)
       return { hasServerKey: keys.anthropic, serverKeys: keys }
@@ -164,7 +187,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     // prepare returns the exact request the server would have sent; the
     // browser runs it against localhost Ollama; finish post-processes the raw
     // output into the same result the server-side path produces.
-    '/api/ai/prepare': ndjson(async (body, onStatus) => {
+    '/api/ai/prepare': ndjson(async (body, onStatus, ctx) => {
       if (body.task === 'insights') {
         if (!body.summary) throw new Error('insights prepare needs a summary')
         const { buildInsightsRequest } = await import('./insights.mjs')
@@ -180,7 +203,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
           return buildAnalysisRequest(null, connectionString || undefined, { onStatus, prebuilt: digest })
         }
         if (!targetPath) throw new Error('connect prepare needs a path or a digest')
-        assertHostedPathAllowed(hosted, targetPath)
+        assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
         return buildAnalysisRequest(targetPath, connectionString || undefined, { onStatus })
       }
       throw new Error(`Unknown AI task: ${body.task}`)
@@ -214,15 +237,15 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       return listDirectory(body.path || undefined)
     }),
 
-    '/api/github/clone': ndjson(async (body, onStatus) => {
+    '/api/github/clone': ndjson(async (body, onStatus, ctx) => {
       if (!body.url) throw new Error('Body must be {"url": "https://github.com/owner/repo"}')
       const { cloneGithubRepo } = await import('./connect.mjs')
-      return cloneGithubRepo(body.url, body.token || undefined, { onStatus })
+      return cloneGithubRepo(body.url, body.token || undefined, { onStatus, destRoot: await reposRootFor(ctx) })
     }),
 
-    '/api/connect/discover': json(async (body) => {
+    '/api/connect/discover': json(async (body, ctx) => {
       if (!body.path) throw new Error('Body must be {"path": "..."}')
-      assertHostedPathAllowed(hosted, body.path)
+      assertHostedPathAllowed(hosted, body.path, await reposRootFor(ctx))
       const { discoverProject } = await import('./connect.mjs')
       return discoverProject(body.path)
     }),
@@ -239,7 +262,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
         return analyzeProject(null, connectionString || undefined, { ...aiOpts, prebuilt: digest })
       }
       if (!targetPath) throw new Error('Body must include a path or a digest')
-      assertHostedPathAllowed(hosted, targetPath)
+      assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
       return analyzeProject(targetPath, connectionString || undefined, aiOpts)
     }),
 
@@ -248,21 +271,21 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       if (!targetPath || !Array.isArray(events) || events.length === 0) {
         throw new Error('Body must be {"path": "...", "events": [...accepted plan events]}')
       }
-      assertHostedPathAllowed(hosted, targetPath)
+      assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
       const { prepareInstrumentation } = await import('./instrument.mjs')
       const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: await allowEnvKeyFor(ctx) })
       onStatus(`Prepared ${prep.edits.length} edits (${prep.edits.filter((e) => e.status === 'ok').length} clean)`)
       return prep
     }),
 
-    '/api/instrument/apply': json(async (body) => {
+    '/api/instrument/apply': json(async (body, ctx) => {
       const { path: targetPath, sdkFile, edits, pushToken } = body
       if (!targetPath || !Array.isArray(edits)) throw new Error('Body must be {"path", "sdkFile", "edits"}')
       const { applyInstrumentation, pushBranch } = await import('./instrument.mjs')
       if (hosted) {
         // Hosted CAN create branches for GitHub-connected projects: the clone
         // lives on this server; the branch is pushed with a one-time token.
-        assertHostedPathAllowed(hosted, targetPath)
+        assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
         if (!pushToken) {
           throw new Error('A GitHub token with write access to the repo is needed to push the branch (used once, never stored)')
         }
@@ -370,7 +393,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     '/api/scan': ndjson(async (body, onStatus, ctx) => {
       const { path: targetPath, model, apiKey, provider, baseUrl } = body
       if (!targetPath || typeof targetPath !== 'string') throw new Error('Body must be {"path": "/path/to/codebase"}')
-      assertHostedPathAllowed(hosted, targetPath)
+      assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
       const { scanCodebase } = await import('./scan.mjs')
       return scanCodebase(targetPath, { model, apiKey, provider, baseUrl, onStatus, allowEnvKey: await allowEnvKeyFor(ctx) })
     }),

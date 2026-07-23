@@ -6,23 +6,20 @@ no aggregate chart can show.
 
 ## Run it
 
-The fastest way (no clone, no build):
+**The easiest way:** if your team already runs a hosted DotChart, just
+open it and sign up — your projects and data are yours alone, and the
+login screen has a live demo you can explore before creating an account.
 
-```sh
-npx dotchart-analytics
-```
-
-That starts DotChart on a local port and opens your browser. Everything —
-tracked events, saved projects — lives in `~/.dotchart` on your machine.
-
-From a clone of the repo instead:
+**Run your own** from a clone of the repo:
 
 ```sh
 npm install
 npm run dev        # development server on :5173
 ```
 
-For an always-on team deployment, see **Self-hosting**.
+Everything — tracked events, saved projects — lives in `~/.dotchart` on
+your machine. For an always-on team deployment with accounts, see
+**Self-hosting**.
 
 ## First five minutes
 

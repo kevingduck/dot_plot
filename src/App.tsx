@@ -118,6 +118,7 @@ export default function App() {
   datasetRef.current = dataset
   const [importError, setImportError] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(() => persisted === null)
+  const [demoPreview, setDemoPreview] = useState(false) // anonymous look-around with sample data (account mode)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [appMode, setAppMode] = useState<AppMode>({ hosted: false, authRequired: false, hasServerKey: true })
   const [modeReady, setModeReady] = useState(false)
@@ -540,8 +541,21 @@ export default function App() {
     URL.revokeObjectURL(url)
   }, [dataset])
 
-  if (modeReady && appMode.authMode && !appMode.user) {
-    return <AuthScreen githubOauth={appMode.githubOauth ?? false} accentColor={colors.series[0]} />
+  if (modeReady && appMode.authMode && !appMode.user && !demoPreview) {
+    return (
+      <AuthScreen
+        githubOauth={appMode.githubOauth ?? false}
+        emailEnabled={appMode.emailEnabled ?? false}
+        accentColor={colors.series[0]}
+        onDemo={() => {
+          const next = seed + 1
+          setSeed(next)
+          loadDataset(generateSample(next))
+          setWizardOpen(false)
+          setDemoPreview(true)
+        }}
+      />
+    )
   }
 
   if (!authOk) {
@@ -580,6 +594,14 @@ export default function App() {
 
   return (
     <div className="app">
+      {demoPreview && (
+        <div className="demo-banner" role="status">
+          You're exploring the demo — fictional data, every feature visible.
+          <button className="btn btn-primary" onClick={() => window.location.reload()}>
+            Sign up to connect your project
+          </button>
+        </div>
+      )}
       <header className="topbar">
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">

@@ -141,6 +141,71 @@ function adoptLegacyData(user, userCount) {
   }
 }
 
+// ---- password reset ----
+// Email delivery via Resend (RESEND_API_KEY + optional RESEND_FROM). The
+// reset link carries an HMAC-signed one-hour token bound to the user's
+// current hash, so it self-invalidates once used.
+
+export function emailEnabled() {
+  return Boolean(process.env.RESEND_API_KEY)
+}
+
+function resetSig(user, exp) {
+  return sign(`reset.${user.id}.${exp}.${user.hash ?? 'github'}`)
+}
+
+export async function requestPasswordReset(email, origin) {
+  if (!emailEnabled()) {
+    throw new Error("Password reset email isn't set up on this DotChart — ask the operator to reset your password")
+  }
+  const user = readUsers().find((u) => u.email === normEmail(email))
+  if (!user) return // silent: never reveal whether an email exists
+  const exp = Date.now() + 3600_000
+  const token = `${user.id}.${exp}.${resetSig(user, exp)}`
+  const link = `${origin}/?reset_token=${encodeURIComponent(token)}`
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      from: process.env.RESEND_FROM || 'DotChart <onboarding@resend.dev>',
+      to: [user.email],
+      subject: 'Reset your DotChart password',
+      text: `Someone (hopefully you) asked to reset the DotChart password for ${user.email}.\n\nReset it here (link valid for 1 hour):\n${link}\n\nIf this wasn't you, ignore this email — nothing changes.`,
+    }),
+  })
+  if (!res.ok) throw new Error(`Could not send the reset email (${res.status}) — try again or contact the operator`)
+}
+
+export function resetPassword(token, newPassword) {
+  const parts = String(token ?? '').split('.')
+  if (parts.length !== 3) throw new Error('Invalid reset link')
+  const [uid, exp, sig] = parts
+  const users = readUsers()
+  const user = users.find((u) => u.id === uid)
+  const expected = user ? resetSig(user, exp) : ''
+  if (!user || sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+    throw new Error('Invalid or already-used reset link — request a new one')
+  }
+  if (Number(exp) < Date.now()) throw new Error('This reset link has expired — request a new one')
+  if (String(newPassword ?? '').length < 8) throw new Error('Password must be at least 8 characters')
+  user.salt = crypto.randomBytes(16).toString('hex')
+  user.hash = hashPassword(String(newPassword), user.salt)
+  writeUsers(users)
+  return { id: user.id, email: user.email }
+}
+
+/** Operator escape hatch (run on the server): node scanner/reset-password.mjs email newpass */
+export function adminSetPassword(email, newPassword) {
+  const users = readUsers()
+  const user = users.find((u) => u.email === normEmail(email))
+  if (!user) throw new Error(`No account with email ${email}`)
+  if (String(newPassword ?? '').length < 8) throw new Error('Password must be at least 8 characters')
+  user.salt = crypto.randomBytes(16).toString('hex')
+  user.hash = hashPassword(String(newPassword), user.salt)
+  writeUsers(users)
+  return user.email
+}
+
 /** Oldest account — receives tokenless legacy /ingest traffic in account mode. */
 export function firstUserId() {
   const users = readUsers()

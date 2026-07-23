@@ -26,19 +26,20 @@ track** and actually wiring it up. That's the part DotChart automates.
 
 **Use a hosted DotChart** (the primary way): open your team's instance,
 sign up, and connect your project — accounts keep every user's projects
-and data separate, and each project gets its own ingest URL.
+and data separate, and each project gets its own ingest URL. No account
+yet? The login screen has a full **live demo** you can explore first.
 
 **Or run your own:**
 
 ```sh
-npx dotchart-analytics
+git clone https://github.com/kevingduck/dot_plot.git && cd dot_plot
+npm install && npm run dev
 ```
 
-Starts on a free port, opens your browser, and lands you in the Connect
-wizard. All data stays in `~/.dotchart` on your machine. (Or clone and
-`npm install && npm run dev`; to serve a multi-user instance for your
-team, see [self-hosting](docs/self-hosting.md) — `DOTCHART_AUTH=1`
-enables accounts.)
+All data stays in `~/.dotchart` on your machine. To serve a multi-user
+instance for your team, see [self-hosting](docs/self-hosting.md) —
+`DOTCHART_AUTH=1` enables accounts. (`npx dotchart-analytics` packaging
+is prepped and coming to npm.)
 
 ## How it works — from zero to tracked in four steps
 

@@ -61,10 +61,15 @@ export function parseGithubUrl(url) {
   return { owner: m[1], repo: m[2] }
 }
 
-/** Shallow-clone (or refresh) a GitHub repo into ~/.dotchart/repos. Tokens are used once and never persisted. */
-export function cloneGithubRepo(url, token, { onStatus = () => {} } = {}) {
+/**
+ * Shallow-clone (or refresh) a GitHub repo. Tokens are used once and never
+ * persisted. `destRoot` namespaces clones per account in multi-user mode —
+ * one user's private-repo clone must never be readable through another
+ * user's connect flow.
+ */
+export function cloneGithubRepo(url, token, { onStatus = () => {}, destRoot } = {}) {
   const { owner, repo } = parseGithubUrl(url)
-  const dest = path.join(os.homedir(), '.dotchart', 'repos', `${owner}__${repo}`)
+  const dest = path.join(destRoot ?? path.join(os.homedir(), '.dotchart', 'repos'), `${owner}__${repo}`)
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   const cleanUrl = `https://github.com/${owner}/${repo}.git`
   const authUrl = token ? `https://x-access-token:${encodeURIComponent(token)}@github.com/${owner}/${repo}.git` : cleanUrl

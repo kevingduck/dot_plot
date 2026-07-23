@@ -31,7 +31,10 @@ export async function postNdjson<T>(url: string, body: unknown, onStatus: (s: st
     headers: { 'content-type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
   })
-  if (res.status === 401) throw new Error('Password required — set it under ⚙ Settings')
+  if (res.status === 401) {
+    const msg = (await res.json().catch(() => null))?.error
+    throw new Error(msg ?? 'Not authorized — log in (or unlock) and try again')
+  }
   if (!res.body) throw new Error(`Request failed (${res.status})`)
   const reader = res.body.getReader()
   const decoder = new TextDecoder()

@@ -38,8 +38,8 @@ function Diff({ edit }: { edit: PreparedEdit }) {
   )
 }
 
-/** Hosted DotChart can only edit repos it cloned itself (GitHub connects). */
-const isServerRepo = (p: string) => /\/\.dotchart\/repos\//.test(p)
+/** Hosted DotChart can only edit repos it cloned itself (GitHub connects — legacy shared dir or per-account dir). */
+const isServerRepo = (p: string) => /\/\.dotchart\/(users\/[^/]+\/)?repos\//.test(p)
 
 export function InstrumentPanel({ defaultPath, events, autoStart, ingestPath = '/ingest' }: Props) {
   const hosted = getAppMode().hosted

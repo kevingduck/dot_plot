@@ -43,6 +43,10 @@ DOTCHART_HOSTED=1 DOTCHART_PASSWORD=… ANTHROPIC_API_KEY=… npm start
   "Continue with GitHub" on the login screen. Register an OAuth app at
   github.com → Settings → Developer settings with callback URL
   `https://your-host/api/auth/github/callback`.
+- `RESEND_API_KEY` (+ optional `RESEND_FROM`) — optional: enables
+  "Forgot password?" reset emails via [resend.com](https://resend.com).
+  Without it, reset an account from the server shell:
+  `node scanner/reset-password.mjs user@example.com newpassword`.
 - `DOTCHART_PASSWORD` — simpler alternative to accounts for a
   single-user/team deployment: one shared password, one shared workspace
   set. Ignored when `DOTCHART_AUTH=1`.
