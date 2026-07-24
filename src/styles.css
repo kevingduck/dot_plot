@@ -8,9 +8,11 @@
   --text-muted: #898781;
   --gridline: #e1e0d9;
   --baseline: #c3c2b7;
-  --border: rgba(11, 11, 11, 0.1);
+  --border: rgba(11, 11, 11, 0.08);
   --wash: rgba(11, 11, 11, 0.05);
   --accent: #2a78d6;
+  --shadow-card: 0 1px 2px rgba(11, 11, 11, 0.04), 0 4px 16px rgba(11, 11, 11, 0.04);
+  --shadow-pop: 0 4px 10px rgba(11, 11, 11, 0.08), 0 12px 32px rgba(11, 11, 11, 0.12);
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme='light'])) {
@@ -22,9 +24,11 @@
     --text-muted: #898781;
     --gridline: #2c2c2a;
     --baseline: #383835;
-    --border: rgba(255, 255, 255, 0.1);
+    --border: rgba(255, 255, 255, 0.09);
     --wash: rgba(255, 255, 255, 0.07);
     --accent: #3987e5;
+    --shadow-card: none;
+    --shadow-pop: 0 8px 32px rgba(0, 0, 0, 0.5);
   }
 }
 :root[data-theme='dark'] {
@@ -36,9 +40,11 @@
   --text-muted: #898781;
   --gridline: #2c2c2a;
   --baseline: #383835;
-  --border: rgba(255, 255, 255, 0.1);
+  --border: rgba(255, 255, 255, 0.09);
   --wash: rgba(255, 255, 255, 0.07);
   --accent: #3987e5;
+  --shadow-card: none;
+  --shadow-pop: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -55,6 +61,12 @@ body {
   background: var(--plane);
   color: var(--text-primary);
   font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .app {
@@ -84,9 +96,9 @@ body {
   display: inline-flex;
 }
 .brand-name {
-  font-weight: 700;
-  font-size: 17px;
-  letter-spacing: -0.01em;
+  font-weight: 750;
+  font-size: 18px;
+  letter-spacing: -0.02em;
 }
 .brand-tag {
   color: var(--text-muted);
@@ -107,12 +119,14 @@ body {
 .btn {
   font: inherit;
   font-size: 13px;
-  padding: 5px 12px;
-  border-radius: 7px;
+  font-weight: 500;
+  padding: 6px 13px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface-1);
   color: var(--text-primary);
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .btn:hover {
   background: var(--wash);
@@ -141,12 +155,13 @@ a.btn {
 
 .btn-primary {
   background: var(--accent);
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 85%, #000);
   color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 1px 2px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .btn-primary:hover {
-  background: var(--accent);
-  opacity: 0.9;
+  background: color-mix(in srgb, var(--accent) 90%, #000);
+  opacity: 1;
 }
 .btn:disabled {
   opacity: 0.5;
@@ -439,9 +454,9 @@ a.btn {
   min-width: 250px;
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 9px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
-  padding: 5px;
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  padding: 6px;
   display: flex;
   flex-direction: column;
 }
@@ -968,11 +983,17 @@ button.picker-row:hover {
 .filter-row input {
   font: inherit;
   font-size: 13px;
-  padding: 5px 9px;
-  border-radius: 7px;
+  padding: 6px 10px;
+  border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface-1);
   color: var(--text-primary);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.12s ease;
+}
+.filter-row select:hover,
+.filter-row input:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 .filter-row input[type='search'] {
   width: 160px;
@@ -987,30 +1008,38 @@ button.picker-row:hover {
 .stat-tile {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
+  border-radius: 12px;
+  padding: 13px 16px 14px;
+  box-shadow: var(--shadow-card);
 }
 .stat-label {
-  font-size: 12px;
-  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 .stat-value {
-  font-size: 26px;
-  font-weight: 600;
-  margin-top: 2px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  margin-top: 4px;
+  line-height: 1.1;
 }
 .stat-note {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-muted);
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 /* ---- cards ---- */
 .card {
   background: var(--surface-1);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 16px 16px;
+  border-radius: 12px;
+  padding: 16px 18px 18px;
+  box-shadow: var(--shadow-card);
 }
 .card-head {
   display: flex;
@@ -1023,6 +1052,8 @@ button.picker-row:hover {
 .card-head h2 {
   margin: 0;
   font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
 }
 .card-sub {
   margin: 2px 0 0;
@@ -1340,6 +1371,19 @@ button.picker-row:hover {
 /* ---- accounts ---- */
 .auth-card {
   max-width: 460px;
+  border-radius: 14px;
+  padding: 24px 26px;
+  box-shadow: var(--shadow-pop);
+}
+.auth-card .brand-name {
+  font-size: 21px;
+}
+.auth-form .scan-path {
+  font-family: inherit;
+  padding: 8px 12px;
+}
+.auth-pitch li::marker {
+  color: var(--accent);
 }
 .auth-pitch {
   margin: 0;
@@ -1394,6 +1438,11 @@ button.picker-row:hover {
 }
 .account-chip .link-btn {
   font-size: 11px;
+}
+
+/* Empty insights card: just the header row, no cavern below it */
+.insights > .card-head:last-child {
+  margin-bottom: 2px;
 }
 
 /* ---- destructive-action confirm (Data menu) ---- */
