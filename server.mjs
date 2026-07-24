@@ -70,7 +70,13 @@ const server = http.createServer(async (req, res) => {
   if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) filePath = path.join(DIST, 'index.html')
   const ext = path.extname(filePath).toLowerCase()
   res.setHeader('content-type', MIME[ext] ?? 'application/octet-stream')
-  if (urlPath.startsWith('/assets/')) res.setHeader('cache-control', 'public, max-age=31536000, immutable')
+  if (urlPath.startsWith('/assets/')) {
+    res.setHeader('cache-control', 'public, max-age=31536000, immutable')
+  } else {
+    // index.html must never go stale — it names the hashed assets. Without
+    // this, browsers heuristically cache it and users see pre-deploy UI.
+    res.setHeader('cache-control', 'no-cache')
+  }
   fs.createReadStream(filePath).pipe(res)
 })
 
