@@ -904,67 +904,7 @@ export default function App() {
         />
       )}
 
-      <div className="filter-row">
-        <select value={rangePreset} onChange={(e) => setRangePreset(e.target.value)} aria-label="Date range">
-          {RANGES.map(([value, label]) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-        {rangePreset === 'custom' && (
-          <>
-            <input
-              type="date"
-              value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              aria-label="Range start"
-            />
-            <span className="range-sep">to</span>
-            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} aria-label="Range end" />
-          </>
-        )}
-        <select value={platform} onChange={(e) => setPlatform(e.target.value)} aria-label="Platform">
-          <option value="all">All platforms</option>
-          {platforms.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-        <select value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} aria-label="Plan">
-          <option value="all">All plans</option>
-          {plans.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-        <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)} aria-label="Sort users">
-          <option value="firstSeen">Sort: signup date</option>
-          <option value="activeDays">Sort: most active days</option>
-          <option value="lastActive">Sort: recently active</option>
-          <option value="streak">Sort: longest streak</option>
-        </select>
-        <input
-          type="search"
-          placeholder="Find user…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          aria-label="Search users"
-        />
-      </div>
-
       <StatTiles stats={stats} coreLabel={coreType?.label ?? 'All'} />
-
-      <InsightCards
-        key={projectKey ?? 'adhoc'}
-        model={model}
-        dataset={dataset}
-        saved={insightsSaved}
-        onSaved={setInsightsSaved}
-        onHighlight={setHighlightUsers}
-      />
 
       <section className="card card-grid">
         <div className="card-head">
@@ -999,6 +939,56 @@ export default function App() {
             })}
           </div>
         </div>
+        <div className="filter-row grid-toolbar">
+        <select value={rangePreset} onChange={(e) => setRangePreset(e.target.value)} aria-label="Date range">
+        {RANGES.map(([value, label]) => (
+        <option key={value} value={value}>
+        {label}
+        </option>
+        ))}
+        </select>
+        {rangePreset === 'custom' && (
+        <>
+        <input
+        type="date"
+        value={customFrom}
+        onChange={(e) => setCustomFrom(e.target.value)}
+        aria-label="Range start"
+        />
+        <span className="range-sep">to</span>
+        <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} aria-label="Range end" />
+        </>
+        )}
+        <select value={platform} onChange={(e) => setPlatform(e.target.value)} aria-label="Platform">
+        <option value="all">All platforms</option>
+        {platforms.map((p) => (
+        <option key={p} value={p}>
+        {p}
+        </option>
+        ))}
+        </select>
+        <select value={planFilter} onChange={(e) => setPlanFilter(e.target.value)} aria-label="Plan">
+        <option value="all">All plans</option>
+        {plans.map((p) => (
+        <option key={p} value={p}>
+        {p}
+        </option>
+        ))}
+        </select>
+        <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortKey)} aria-label="Sort users">
+        <option value="firstSeen">Sort: signup date</option>
+        <option value="activeDays">Sort: most active days</option>
+        <option value="lastActive">Sort: recently active</option>
+        <option value="streak">Sort: longest streak</option>
+        </select>
+        <input
+        type="search"
+        placeholder="Find user…"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        aria-label="Search users"
+        />
+        </div>
         {dataset.source === NO_PROJECT ? (
           <div className="empty-note waiting-note">
             <div>
@@ -1032,6 +1022,15 @@ export default function App() {
           <div className="empty-note">No matching users — adjust the filters, or import a CSV with columns user_id, event, timestamp.</div>
         )}
       </section>
+
+      <InsightCards
+        key={projectKey ?? 'adhoc'}
+        model={model}
+        dataset={dataset}
+        saved={insightsSaved}
+        onSaved={setInsightsSaved}
+        onHighlight={setHighlightUsers}
+      />
 
       <section className="card">
         <div className="card-head">
