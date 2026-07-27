@@ -112,7 +112,7 @@ const CSS = `
   --plane:#0d0d0d; --surface:#1a1a19; --text:#fff; --text2:#c3c2b7; --muted:#898781;
   --border:rgba(255,255,255,.1); --wash:rgba(255,255,255,.07); --accent:#3987e5; } }
 * { box-sizing:border-box }
-body { margin:0; font-family:system-ui,-apple-system,'Segoe UI',sans-serif; font-size:14px;
+body { margin:0; font-family:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif; font-size:14px;
   background:var(--plane); color:var(--text); line-height:1.55 }
 .topbar { display:flex; align-items:baseline; gap:8px; padding:14px 24px; border-bottom:1px solid var(--border) }
 .topbar a.brand { font-weight:700; font-size:16px; color:var(--text); text-decoration:none }
@@ -124,7 +124,9 @@ nav a { padding:6px 10px; border-radius:7px; color:var(--text2); text-decoration
 nav a:hover { background:var(--wash) }
 nav a.on { background:var(--wash); color:var(--text); font-weight:600 }
 article { flex:1; min-width:0; max-width:68ch }
-article h1 { font-size:22px; margin:0 0 12px; letter-spacing:-.01em }
+article h1, article h2, .topbar a.brand { font-family:'Bricolage Grotesque',system-ui,sans-serif }
+article code, article pre { font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace }
+article h1 { font-size:23px; font-weight:700; margin:0 0 12px; letter-spacing:-.01em }
 article h2 { font-size:15px; margin:22px 0 6px }
 article h3 { font-size:13.5px; margin:16px 0 4px }
 article p, article li { color:var(--text2) }
@@ -156,6 +158,8 @@ export function renderDocsPage(slug) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <title>${esc(page.title)} — DotChart docs</title>
 <style>${CSS}</style>
 </head>

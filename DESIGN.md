@@ -25,7 +25,9 @@ open. One primary action per screen region.
 ## Tokens (`src/styles.css :root`)
 
 - **Surfaces**: `--plane` (page), `--surface-1` (cards). Dark mode is its
-  own selection, not an inversion.
+  own selection, not an inversion. The page behind the cards is not flat:
+  a faint dot-grid field (`--atmo-dot`, the product's own motif) under a
+  soft accent glow at the top (`--atmo-glow`), fixed-attached.
 - **Ink**: `--text-primary` / `--text-secondary` / `--text-muted`. Text
   never wears series colors.
 - **Lines**: `--border` (hairlines ~8% ink), `--gridline`, `--baseline`.
@@ -35,16 +37,31 @@ open. One primary action per screen region.
   second accent.
 - **Radii**: 12px cards, 10px popovers/toolbars, 8px controls, 999px chips.
 
-## Type scale
+## Type
+
+Three faces, high-contrast pairing (display grotesque + Plex), loaded from
+Google Fonts with system fallbacks (`--font-display/-body/-mono`):
+
+- **Bricolage Grotesque** — display: brand lockup, card titles. 700–800.
+- **IBM Plex Sans** — body, controls, canvas labels.
+- **IBM Plex Mono** — data voice: KPI values, event keys, paths, code,
+  diffs. Never for human input like email.
 
 | Use | Spec |
 |---|---|
-| KPI value | 24px / 700 / -0.02em / tabular-nums |
-| Page & card titles | 15–18px / 650–750 / -0.01 to -0.02em |
-| Body / controls | 13–14px / 400–500 |
+| KPI value | mono 23px / 600 / -0.03em |
+| Card titles | display 16px / 700 |
+| Brand | display 19px / 800 |
+| Body / controls | body 13–14px / 400–500 |
 | Hints, subs | 12–12.5px muted |
-| Overlines (stat labels, step labels) | 10.5–11px / 600 / uppercase / +0.06em |
-| Paths, URLs, code | monospace — never for human input like email |
+| Overlines | 10.5–11px / 600 / uppercase / +0.06em |
+
+## Motion
+
+One orchestrated moment: the page-load reveal — sections rise in top to
+bottom on a 50ms stagger. Menus pop in (140ms). Chips and cards lift 1px
+on hover. Everything inside `prefers-reduced-motion: no-preference`;
+nothing loops except the scan pulse.
 
 ## Chart rules
 

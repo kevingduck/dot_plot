@@ -13,6 +13,11 @@
   --accent: #2a78d6;
   --shadow-card: 0 1px 2px rgba(11, 11, 11, 0.04), 0 4px 16px rgba(11, 11, 11, 0.04);
   --shadow-pop: 0 4px 10px rgba(11, 11, 11, 0.08), 0 12px 32px rgba(11, 11, 11, 0.12);
+  --font-display: 'Bricolage Grotesque', system-ui, sans-serif;
+  --font-body: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --atmo-dot: rgba(11, 11, 11, 0.055);
+  --atmo-glow: color-mix(in srgb, var(--accent) 7%, transparent);
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme='light'])) {
@@ -29,6 +34,8 @@
     --accent: #3987e5;
     --shadow-card: none;
     --shadow-pop: 0 8px 32px rgba(0, 0, 0, 0.5);
+    --atmo-dot: rgba(255, 255, 255, 0.05);
+    --atmo-glow: color-mix(in srgb, var(--accent) 11%, transparent);
   }
 }
 :root[data-theme='dark'] {
@@ -45,6 +52,8 @@
   --accent: #3987e5;
   --shadow-card: none;
   --shadow-pop: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --atmo-dot: rgba(255, 255, 255, 0.05);
+  --atmo-glow: color-mix(in srgb, var(--accent) 11%, transparent);
 }
 
 * {
@@ -57,12 +66,21 @@ body,
   height: 100%;
 }
 body {
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  background: var(--plane);
+  font-family: var(--font-body);
+  background:
+    radial-gradient(1100px 480px at 50% -120px, var(--atmo-glow), transparent 70%),
+    radial-gradient(circle at 1px 1px, var(--atmo-dot) 1.1px, transparent 0) 0 0 / 22px 22px,
+    var(--plane);
+  background-attachment: fixed;
   color: var(--text-primary);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+}
+code,
+pre,
+kbd {
+  font-family: var(--font-mono);
 }
 :focus-visible {
   outline: 2px solid var(--accent);
@@ -76,6 +94,45 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* ---- entrance: one orchestrated reveal, top to bottom ---- */
+@media (prefers-reduced-motion: no-preference) {
+  .app > * {
+    /* 'backwards', never 'both': a retained transform animation keeps each
+       section in its own stacking context, which would paint later sections
+       over the topbar's open menus */
+    animation: rise-in 0.45s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  }
+  .app > *:nth-child(2) { animation-delay: 0.05s; }
+  .app > *:nth-child(3) { animation-delay: 0.1s; }
+  .app > *:nth-child(4) { animation-delay: 0.15s; }
+  .app > *:nth-child(5) { animation-delay: 0.2s; }
+  .app > *:nth-child(6) { animation-delay: 0.25s; }
+  .app > *:nth-child(n + 7) { animation-delay: 0.3s; }
+  .menu {
+    animation: pop-in 0.14s cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ---- top bar ---- */
@@ -96,9 +153,10 @@ body {
   display: inline-flex;
 }
 .brand-name {
-  font-weight: 750;
-  font-size: 18px;
-  letter-spacing: -0.02em;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 19px;
+  letter-spacing: -0.01em;
 }
 .brand-tag {
   color: var(--text-muted);
@@ -186,7 +244,7 @@ a.btn {
   min-width: 240px;
   font: inherit;
   font-size: 13px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   padding: 6px 10px;
   border-radius: 7px;
   border: 1px solid var(--border);
@@ -305,7 +363,7 @@ a.btn {
 }
 .diff {
   margin: 8px 0 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11.5px;
   line-height: 1.5;
   border-radius: 6px;
@@ -532,7 +590,7 @@ a.btn {
 }
 .picker-path {
   font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   color: var(--text-secondary);
   margin-left: 6px;
   overflow: hidden;
@@ -787,7 +845,7 @@ button.picker-row:hover {
 .db-event-key {
   font: inherit;
   font-size: 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   padding: 3px 7px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -876,7 +934,7 @@ button.picker-row:hover {
 .plan-map select {
   font: inherit;
   font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   padding: 2px 6px;
   border-radius: 6px;
   border: 1px solid var(--border);
@@ -948,7 +1006,7 @@ button.picker-row:hover {
 .instr-snippet {
   margin: 0;
   font-size: 11px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-primary);
@@ -1036,12 +1094,12 @@ button.picker-row:hover {
   white-space: nowrap;
 }
 .stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
   margin-top: 2px;
-  line-height: 1.1;
+  line-height: 1.15;
 }
 .stat-note {
   font-size: 11px;
@@ -1067,8 +1125,9 @@ button.picker-row:hover {
 }
 .card-head h2 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 650;
+  font-family: var(--font-display);
+  font-size: 16px;
+  font-weight: 700;
   letter-spacing: -0.01em;
 }
 .card-sub {
@@ -1083,6 +1142,21 @@ button.picker-row:hover {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+.legend-toggle {
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+.legend-toggle:hover {
+  transform: translateY(-1px);
+}
+.insight-card,
+.provider-card {
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.insight-card:hover,
+.provider-card:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-card);
 }
 .legend-item {
   display: inline-flex;

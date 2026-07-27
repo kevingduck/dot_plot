@@ -8,7 +8,7 @@ const ROW_H = 22
 const COL_W = 20
 const GUTTER_W = 224
 const HEADER_H = 44
-const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
+const FONT = '"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif'
 
 interface Props {
   model: GridModel
@@ -270,6 +270,8 @@ export function DotPlot({ model, registry, colors, selectedUserId, highlightUser
 
   useEffect(() => {
     draw()
+    // First paint can race the webfont — redraw once it lands
+    document.fonts?.ready.then(draw)
   }, [draw])
 
   // Open scrolled to the most recent days — that's what the reader checks first.
