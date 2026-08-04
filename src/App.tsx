@@ -891,7 +891,10 @@ export default function App() {
         </div>
       )}
 
-      {plan && planOpen && (
+      {/* Hidden, never unmounted: the panel holds proposed instrumentation
+          edits — "Hide event plan" must not destroy them */}
+      {plan && (
+        <div style={{ display: planOpen ? undefined : 'none' }}>
         <EventPlanPanel
           key={`${plan.meta?.generated_at ?? ''}:${plan.events.map((e) => e.key).join(',')}`}
           plan={plan}
@@ -902,6 +905,7 @@ export default function App() {
           onApply={applyPlan}
           onClose={() => setPlanOpen(false)}
         />
+        </div>
       )}
 
       <StatTiles stats={stats} coreLabel={coreType?.label ?? 'All'} />
