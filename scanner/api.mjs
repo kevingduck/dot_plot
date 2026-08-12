@@ -119,17 +119,42 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
   /**
    * Server env API keys belong to the instance owner (first account); other
    * accounts may burn DOTCHART_FREE_ANALYSES of them, then bring their own.
-   * Consumes a credit only when the request would actually use the env key.
+   *
+   * One credit = one project analysis (connect/scan). Follow-up calls in the
+   * same funnel — instrumentation, insights — ride along without consuming
+   * (rate-limited instead), so "3 free analyses" means 3 projects end to end,
+   * not 1 project that dies at the instrument step.
    */
   const freeLimit = () => Math.max(0, Number(process.env.DOTCHART_FREE_ANALYSES || 0) || 0)
 
-  const allowEnvKeyFor = async (ctx, body) => {
-    if (!authMode) return true
-    if (!ctx?.user) return false
+  // Returns { allowed, consumed } — consumed=true only when a credit was burned
+  const allowEnvKeyFor = async (ctx, body, { consume = false } = {}) => {
+    if (!authMode) return { allowed: true, consumed: false }
+    if (!ctx?.user) return { allowed: false, consumed: false }
     const { firstUserId, consumeFreeAnalysis } = await import('./auth.mjs')
-    if (ctx.user.id === firstUserId()) return true
-    if (body?.apiKey || body?.provider === 'ollama') return false // env key not needed — don't burn a credit
-    return freeLimit() > 0 && consumeFreeAnalysis(ctx.user.id, freeLimit())
+    if (ctx.user.id === firstUserId()) return { allowed: true, consumed: false }
+    if (body?.apiKey || body?.provider === 'ollama') return { allowed: false, consumed: false } // env key not needed
+    if (!consume) {
+      // Free rider on the trial: allowed while the trial exists, but bounded
+      const ok = freeLimit() > 0 && rateLimit(`envai:${ctx.user.id}`, 20, 3_600_000)
+      return { allowed: ok, consumed: false }
+    }
+    const ok = freeLimit() > 0 && consumeFreeAnalysis(ctx.user.id, freeLimit())
+    return { allowed: ok, consumed: ok }
+  }
+
+  /** Run fn with an env-key grant; a consumed credit is refunded if fn throws (a failed analysis costs nothing). */
+  const withEnvCredit = async (ctx, body, fn) => {
+    const grant = await allowEnvKeyFor(ctx, body, { consume: true })
+    try {
+      return await fn(grant.allowed)
+    } catch (err) {
+      if (grant.consumed) {
+        const { refundFreeAnalysis } = await import('./auth.mjs')
+        refundFreeAnalysis(ctx.user.id)
+      }
+      throw err
+    }
   }
 
   const effectiveServerKeys = async (ctx) => {
@@ -315,17 +340,20 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     '/api/connect/analyze': ndjson(async (body, onStatus, ctx) => {
       const { analyzeProject } = await import('./connect.mjs')
       const { path: targetPath, connectionString, model, apiKey, provider, baseUrl, digest } = body
-      const aiOpts = { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: await allowEnvKeyFor(ctx, body) }
       if (digest) {
         // Browser-side digest (hosted local-folder flow)
         if (!digest.name || typeof digest.digest !== 'string' || !digest.digest) {
           throw new Error('Digest upload must include {name, digest, included, skipped}')
         }
-        return analyzeProject(null, connectionString || undefined, { ...aiOpts, prebuilt: digest })
+        return withEnvCredit(ctx, body, (allowEnvKey) =>
+          analyzeProject(null, connectionString || undefined, { onStatus, model, apiKey, provider, baseUrl, allowEnvKey, prebuilt: digest }),
+        )
       }
       if (!targetPath) throw new Error('Body must include a path or a digest')
       assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
-      return analyzeProject(targetPath, connectionString || undefined, aiOpts)
+      return withEnvCredit(ctx, body, (allowEnvKey) =>
+        analyzeProject(targetPath, connectionString || undefined, { onStatus, model, apiKey, provider, baseUrl, allowEnvKey }),
+      )
     }),
 
     '/api/instrument/prepare': ndjson(async (body, onStatus, ctx) => {
@@ -335,7 +363,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       }
       assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
       const { prepareInstrumentation } = await import('./instrument.mjs')
-      const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: await allowEnvKeyFor(ctx, body) })
+      const prep = await prepareInstrumentation(targetPath, events, { onStatus, model, apiKey, provider, baseUrl, allowEnvKey: (await allowEnvKeyFor(ctx, body)).allowed })
       onStatus(`Prepared ${prep.edits.length} edits (${prep.edits.filter((e) => e.status === 'ok').length} clean)`)
       return prep
     }),
@@ -417,7 +445,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
     '/api/insights': json(async (body, ctx) => {
       if (!body.summary) throw new Error('Body must include a usage summary')
       const { findInsights } = await import('./insights.mjs')
-      const out = await findInsights(body.summary, { model: body.model, apiKey: body.apiKey, provider: body.provider, baseUrl: body.baseUrl, allowEnvKey: await allowEnvKeyFor(ctx, body) })
+      const out = await findInsights(body.summary, { model: body.model, apiKey: body.apiKey, provider: body.provider, baseUrl: body.baseUrl, allowEnvKey: (await allowEnvKeyFor(ctx, body)).allowed })
       log(`insights: ${out.insights.length} found (${out.meta.usage.input_tokens} in / ${out.meta.usage.output_tokens} out tokens)`)
       return out
     }),
@@ -440,7 +468,7 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
         const infos = files.map((f) => storeInfo(f))
         return {
           count: infos.reduce((n, i) => n + i.count, 0),
-          lastReceived: infos.map((i) => i.lastReceived).filter(Boolean).sort().pop() ?? null,
+          lastReceived: infos.map((i) => i.lastReceived).filter(Boolean).sort((a, b) => a - b).pop() ?? null,
         }
       }
       const events = files
@@ -470,7 +498,9 @@ export function createApiHandler({ log = () => {}, hosted = false, password = ''
       if (!targetPath || typeof targetPath !== 'string') throw new Error('Body must be {"path": "/path/to/codebase"}')
       assertHostedPathAllowed(hosted, targetPath, await reposRootFor(ctx))
       const { scanCodebase } = await import('./scan.mjs')
-      return scanCodebase(targetPath, { model, apiKey, provider, baseUrl, onStatus, allowEnvKey: await allowEnvKeyFor(ctx, body) })
+      return withEnvCredit(ctx, body, (allowEnvKey) =>
+        scanCodebase(targetPath, { model, apiKey, provider, baseUrl, onStatus, allowEnvKey }),
+      )
     }),
   }
 

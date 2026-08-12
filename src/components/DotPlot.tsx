@@ -389,6 +389,9 @@ export function DotPlot({ model, registry, colors, selectedUserId, highlightUser
       <div
         ref={viewportRef}
         className="dotplot-viewport"
+        // Hug the content: a 3-user project gets a 3-row grid, not a fixed
+        // half-screen slab (CSS max-height still caps tall datasets)
+        style={{ height: totalH + 16 }}
         role="grid"
         aria-label="Per-user daily activity"
         tabIndex={0}

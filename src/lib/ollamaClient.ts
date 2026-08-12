@@ -21,9 +21,24 @@ export function isLocalUrl(url: string): boolean {
  * Can this page reach the given Ollama? Never throws. The generous timeout
  * matters: on a hosted page, Chrome's local-network permission prompt blocks
  * the fetch until the user answers — aborting early would kill the prompt.
+ *
+ * Results are cached briefly per URL: several components probe on mount, and
+ * when Ollama isn't running each probe logs a connection error to the console.
+ * Pass {force: true} for the explicit "Re-detect" buttons.
  */
-export async function probeOllama(baseUrl: string): Promise<OllamaProbe> {
+const probeCache = new Map<string, { at: number; result: Promise<OllamaProbe> }>()
+const PROBE_TTL = 60_000
+
+export function probeOllama(baseUrl: string, opts: { force?: boolean } = {}): Promise<OllamaProbe> {
   const base = baseUrl.trim().replace(/\/+$/, '')
+  const hit = probeCache.get(base)
+  if (!opts.force && hit && Date.now() - hit.at < PROBE_TTL) return hit.result
+  const result = doProbe(base)
+  probeCache.set(base, { at: Date.now(), result })
+  return result
+}
+
+async function doProbe(base: string): Promise<OllamaProbe> {
   try {
     const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(15000) })
     if (!res.ok) return { ok: false, models: [], error: `Ollama returned ${res.status}` }

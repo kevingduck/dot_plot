@@ -5,7 +5,7 @@ import { PROVIDERS, addRecent, aiParams, getRecents, getSettings, saveSettings, 
 import { browserOllamaActive, runBrowserOllamaTask } from '../lib/ai'
 import { probeOllama, type OllamaProbe } from '../lib/ollamaClient'
 import { digestFromFileList, pickLocalFolder, type LocalDigest } from '../lib/localdigest'
-import { getAppMode } from '../lib/mode'
+import { fetchAppMode, getAppMode } from '../lib/mode'
 import { DbPanel } from './DbPanel'
 
 interface GithubRepo {
@@ -152,6 +152,7 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
   const [keyBusy, setKeyBusy] = useState(false)
   const [keyError, setKeyError] = useState<string | null>(null)
   const [ollama, setOllama] = useState<OllamaProbe | null>(null)
+  const [freeLeft, setFreeLeft] = useState<number | null>(getAppMode().freeAnalyses ?? null)
 
   // Silent probe so the Ollama card can say "detected · N models"
   useEffect(() => {
@@ -279,6 +280,9 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setPhase('discovered')
+    } finally {
+      // The analysis may have consumed a free credit — show the real count
+      fetchAppMode().then((m) => setFreeLeft(m.freeAnalyses ?? null), () => {})
     }
   }
 
@@ -287,10 +291,10 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
   const codeEvents = useMemo(() => acceptedEvents.filter((e) => !e.db_mapping?.table), [acceptedEvents])
 
   const finish = async () => {
-    if (!plan || !project) return
+    if (!plan || !project || acceptedEvents.length === 0) return
     setError(null)
     if (dbEvents.length === 0) {
-      onPlanOnly({ ...plan, events: acceptedEvents.length ? acceptedEvents : plan.events })
+      onPlanOnly({ ...plan, events: acceptedEvents })
       return
     }
     setPhase('importing')
@@ -607,7 +611,7 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
                   ) : (
                     <div className="scan-hint">
                       Ollama is running but has no models yet — <code>ollama pull qwen3:8b</code>, then{' '}
-                      <button className="link-btn" onClick={() => probeOllama(aiCfg.ollamaUrl).then(setOllama)}>
+                      <button className="link-btn" onClick={() => probeOllama(aiCfg.ollamaUrl, { force: true }).then(setOllama)}>
                         re-detect
                       </button>
                     </div>
@@ -629,7 +633,7 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
                         running.
                       </>
                     )}{' '}
-                    <button className="link-btn" onClick={() => probeOllama(aiCfg.ollamaUrl).then(setOllama)}>
+                    <button className="link-btn" onClick={() => probeOllama(aiCfg.ollamaUrl, { force: true }).then(setOllama)}>
                       Re-detect
                     </button>{' '}
                     · Remote Ollama URL? Set it in ⚙ Settings.
@@ -648,8 +652,8 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
             {aiReady && (
               <span className="scan-hint">
                 AI: {aiCfg.provider === 'ollama' ? `${aiCfg.models.ollama} (local)` : aiCfg.models[aiCfg.provider]}
-                {aiCfg.provider !== 'ollama' && !aiCfg.keys[aiCfg.provider] && (getAppMode().freeAnalyses ?? null) !== null
-                  ? ` · ${getAppMode().freeAnalyses} free ${getAppMode().freeAnalyses === 1 ? 'analysis' : 'analyses'} left`
+                {aiCfg.provider !== 'ollama' && !aiCfg.keys[aiCfg.provider] && freeLeft !== null
+                  ? ` · ${freeLeft} free ${freeLeft === 1 ? 'analysis' : 'analyses'} left`
                   : ''}{' '}
                 — change in ⚙ Settings
               </span>
@@ -718,10 +722,16 @@ export function ConnectWizard({ hosted, serverKeys, onData, onPlanOnly, onDbImpo
                 </label>
               </>
             ) : (
-              <button className="btn btn-primary" onClick={finish}>
+              <button
+                className="btn btn-primary"
+                onClick={finish}
+                disabled={acceptedEvents.length === 0}
+                title={acceptedEvents.length === 0 ? 'Check at least one event to track' : undefined}
+              >
                 Save plan &amp; set up tracking
               </button>
             )}
+            {acceptedEvents.length === 0 && <span className="scan-hint">Check at least one event to continue.</span>}
             {codeEvents.length > 0 && dbEvents.length > 0 && (
               <span className="scan-hint">
                 {codeEvents.length} more event{codeEvents.length === 1 ? '' : 's'} need instrumentation — one click after

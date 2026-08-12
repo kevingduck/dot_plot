@@ -559,6 +559,16 @@ a.btn {
   background: var(--wash);
   color: var(--text-primary);
 }
+.menu-delete-confirm,
+.menu-delete-confirm:hover {
+  color: #b3261e;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.plan-no-locations {
+  color: var(--text-muted);
+  padding: 0 8px;
+}
 
 /* ---- folder picker ---- */
 .picker {
@@ -1199,7 +1209,8 @@ button.picker-row:hover {
 .dotplot-viewport {
   position: relative;
   overflow: auto;
-  height: min(62vh, 640px);
+  max-height: min(62vh, 640px);
+  min-height: 96px;
   border: 1px solid var(--gridline);
   border-radius: 8px;
   background: var(--surface-1);

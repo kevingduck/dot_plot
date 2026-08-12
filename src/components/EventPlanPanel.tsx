@@ -203,7 +203,7 @@ export function EventPlanPanel({ plan, ingestPath = '/ingest', liveCount, datase
         </div>
       </div>
 
-      <p className="plan-summary">{plan.product_summary}</p>
+      {plan.product_summary && <p className="plan-summary">{plan.product_summary}</p>}
 
       {reportingCount === 0 && (
         <p className="plan-map-hint">
@@ -277,7 +277,7 @@ export function EventPlanPanel({ plan, ingestPath = '/ingest', liveCount, datase
                 <td>
                   <div className="plan-event-label">{e.label}</div>
                   <code className="plan-event-key">{e.key}</code>
-                  <div className="plan-event-desc">{e.description}</div>
+                  {e.description && <div className="plan-event-desc">{e.description}</div>}
                   <div className={`track-status${reportingKeys.has(e.key) ? ' track-live' : ''}`}>
                     {reportingKeys.has(e.key)
                       ? `● reporting data${!datasetEvents.has(e.key) && mapping.get(e.key) ? ` (as ${mapping.get(e.key)})` : ''}`
@@ -312,9 +312,13 @@ export function EventPlanPanel({ plan, ingestPath = '/ingest', liveCount, datase
                 </td>
                 <td className="plan-rationale">{e.rationale}</td>
                 <td>
+                  {e.instrumentation.length === 0 ? (
+                    <span className="plan-no-locations" title="The scan didn't record code locations for this event">—</span>
+                  ) : (
                   <button className="btn btn-ghost plan-expand" onClick={() => setExpanded(isOpen ? null : e.key)}>
                     {e.instrumentation.length} location{e.instrumentation.length === 1 ? '' : 's'} {isOpen ? '▾' : '▸'}
                   </button>
+                  )}
                   {isOpen && (
                     <div className="instr-list">
                       {e.instrumentation.map((p, i) => {

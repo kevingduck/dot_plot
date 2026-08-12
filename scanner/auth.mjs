@@ -161,6 +161,15 @@ export function consumeFreeAnalysis(userId, limit) {
   return true
 }
 
+/** Give a consumed credit back — a failed analysis must not cost one. */
+export function refundFreeAnalysis(userId) {
+  const users = readUsers()
+  const user = users.find((u) => u.id === userId)
+  if (!user || !(user.free_used > 0)) return
+  user.free_used -= 1
+  writeUsers(users)
+}
+
 // ---- GitHub repo access token (OAuth `repo` scope, encrypted at rest) ----
 
 function encryptToken(text) {

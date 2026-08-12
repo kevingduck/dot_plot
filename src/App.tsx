@@ -120,6 +120,12 @@ export default function App() {
   const [wizardOpen, setWizardOpen] = useState(
     () => persisted === null || new URLSearchParams(window.location.search).get('github') === 'connected',
   )
+  // Once opened, the wizard stays mounted (hidden at most) — closing it
+  // mid-analyze must not throw away the phase state or a running analysis
+  const [wizardStarted, setWizardStarted] = useState(wizardOpen)
+  useEffect(() => {
+    if (wizardOpen) setWizardStarted(true)
+  }, [wizardOpen])
   const [demoPreview, setDemoPreview] = useState(false) // anonymous look-around with sample data (account mode)
 
   // Clean the ?github=connected marker once the wizard has read it
@@ -183,6 +189,29 @@ export default function App() {
   const [insightsSaved, setInsightsSaved] = useState<InsightsResponse | null>(persisted?.insights ?? null)
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
   const [projectsMenuOpen, setProjectsMenuOpen] = useState(false)
+  const [confirmForget, setConfirmForget] = useState<string | null>(null) // slug awaiting delete confirmation
+
+  // Menus behave like menus: outside click or Escape dismisses them
+  useEffect(() => {
+    if (!dataMenuOpen && !projectsMenuOpen) return
+    const closeAll = () => {
+      setProjectsMenuOpen(false)
+      setDataMenuOpen(false)
+      setConfirmForget(null)
+    }
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target instanceof Element) || !e.target.closest('.menu-wrap')) closeAll()
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeAll()
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [dataMenuOpen, projectsMenuOpen])
   const [ingestToken, setIngestToken] = useState<string | null>(null)
   const projectKey = plan?.meta?.scanned_path ?? null
   const activeSlug = workspaces.find((w) => w.path === projectKey)?.slug ?? null
@@ -209,20 +238,34 @@ export default function App() {
       if (r.projects.length > 0) {
         loadWorkspace(r.projects[0].slug)
         setWizardOpen(false)
+      } else if (appMode.authMode) {
+        // Zero server-side projects for this account: the mount-time state was
+        // seeded from the shared browser cache, which may belong to whoever
+        // used this browser before — this account starts genuinely empty.
+        loadDataset(emptyDataset())
+        setPlan(null)
+        setPlanOpen(false)
+        setDbSync(null)
+        setInsightsSaved(null)
+        setIngestToken(null)
+        setWizardOpen(true)
       }
     }, () => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modeReady])
 
-  // Autosave the active project's workspace (debounced) whenever it changes
+  // Autosave the active project's workspace (debounced) whenever it changes.
+  // While demo data is on screen the workspace is left completely alone —
+  // saving would overwrite the project's real dataset with null (and demo
+  // insights with fictional ones). The demo is a look-around, not a state.
   useEffect(() => {
     if (!projectKey) return
+    if (dataset.source.startsWith('Sample data')) return
     const t = setTimeout(() => {
-      const demo = dataset.source.startsWith('Sample data')
       postJson<{ ingest_token?: string }>('/api/projects/save', {
         path: projectKey,
         name: projectKey.replace(/^local:/, '').split('/').pop(),
-        dataset: demo ? null : dataset,
+        dataset,
         plan,
         dbSync,
         insights: insightsSaved,
@@ -248,8 +291,15 @@ export default function App() {
     const curPlanCount = dataset.registry.filter((t) => planKeySet.has(t.key)).length
     const expCount = expected.filter((t) => t.key !== '__other__').length
     if (expCount > curPlanCount) {
+      const before = new Set(dataset.registry.map((t) => t.key))
       setDataset((prev) => ({ ...prev, registry: expected }))
-      setEnabledEvents(new Set(expected.map((t) => t.key)))
+      // Enable only the newly promoted events — a legend entry the user
+      // switched off must not switch itself back on
+      setEnabledEvents((prev) => {
+        const next = new Set(prev)
+        for (const t of expected) if (!before.has(t.key)) next.add(t.key)
+        return next
+      })
     }
   }, [dataset, plan])
 
@@ -283,6 +333,16 @@ export default function App() {
     setSearch('')
     setImportError(null)
   }, [])
+
+  // One door to the demo: fresh sample data, and the active project's plan
+  // panel folds away (it stays mounted — nothing is lost) so fictional users
+  // aren't presented under a real project's event plan.
+  const loadDemo = useCallback(() => {
+    const next = seed + 1
+    setSeed(next)
+    loadDataset(generateSample(next))
+    setPlanOpen(false)
+  }, [seed, loadDataset])
 
   // Merge events received via /ingest into the current dataset (deduped).
   // If the grid is showing demo data, real events REPLACE it — fictional and
@@ -557,9 +617,7 @@ export default function App() {
         emailEnabled={appMode.emailEnabled ?? false}
         accentColor={colors.series[0]}
         onDemo={() => {
-          const next = seed + 1
-          setSeed(next)
-          loadDataset(generateSample(next))
+          loadDemo()
           setWizardOpen(false)
           setDemoPreview(true)
         }}
@@ -637,7 +695,11 @@ export default function App() {
             <div className="menu-wrap">
               <button
                 className="btn"
-                onClick={() => setProjectsMenuOpen(!projectsMenuOpen)}
+                onClick={() => {
+                  setProjectsMenuOpen(!projectsMenuOpen)
+                  setDataMenuOpen(false)
+                  setConfirmForget(null)
+                }}
                 aria-expanded={projectsMenuOpen}
                 aria-haspopup="menu"
               >
@@ -654,17 +716,39 @@ export default function App() {
                           {w.users} users · {w.events.toLocaleString()} events{w.hasInsights ? ' · insights' : ''}
                         </span>
                       </button>
-                      <button
-                        className="menu-delete"
-                        aria-label={`Forget ${w.name}`}
-                        title="Forget this saved project"
-                        onClick={async () => {
-                          await postJson('/api/projects/delete', { slug: w.slug })
-                          refreshWorkspaces()
-                        }}
-                      >
-                        ✕
-                      </button>
+                      {confirmForget === w.slug ? (
+                        <button
+                          className="menu-delete menu-delete-confirm"
+                          aria-label={`Really forget ${w.name}`}
+                          title="Deletes the saved dataset, plan and insights for this project — click to confirm"
+                          onClick={async () => {
+                            setConfirmForget(null)
+                            if (w.slug === activeSlug) {
+                              // Forgetting the ACTIVE project must also detach it —
+                              // otherwise the autosave recreates the workspace seconds later
+                              loadDataset(emptyDataset())
+                              setPlan(null)
+                              setPlanOpen(false)
+                              setDbSync(null)
+                              setInsightsSaved(null)
+                              setIngestToken(null)
+                            }
+                            await postJson('/api/projects/delete', { slug: w.slug })
+                            refreshWorkspaces()
+                          }}
+                        >
+                          forget?
+                        </button>
+                      ) : (
+                        <button
+                          className="menu-delete"
+                          aria-label={`Forget ${w.name}`}
+                          title="Forget this saved project (asks to confirm)"
+                          onClick={() => setConfirmForget(w.slug)}
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -672,7 +756,16 @@ export default function App() {
             </div>
           )}
           <div className="menu-wrap">
-            <button className="btn" onClick={() => setDataMenuOpen(!dataMenuOpen)} aria-expanded={dataMenuOpen} aria-haspopup="menu">
+            <button
+              className="btn"
+              onClick={() => {
+                setDataMenuOpen(!dataMenuOpen)
+                setProjectsMenuOpen(false)
+                setConfirmForget(null)
+              }}
+              aria-expanded={dataMenuOpen}
+              aria-haspopup="menu"
+            >
               Data ▾
             </button>
             {dataMenuOpen && (
@@ -686,14 +779,7 @@ export default function App() {
                 <button role="menuitem" onClick={() => (setDataMenuOpen(false), onExport())}>
                   Export current data as CSV
                 </button>
-                <button
-                  role="menuitem"
-                  onClick={() => {
-                    const next = seed + 1
-                    setSeed(next)
-                    loadDataset(generateSample(next))
-                  }}
-                >
+                <button role="menuitem" onClick={loadDemo}>
                   Load demo data (fictional music app)
                 </button>
                 {appMode.authMode && activeSlug && ingestToken && (
@@ -829,11 +915,7 @@ export default function App() {
           users: dataset.source !== NO_PROJECT && !dataset.source.startsWith('Sample data') && dataset.events.length > 0,
           insights: insightsSaved != null,
         }}
-        onDemo={() => {
-          const next = seed + 1
-          setSeed(next)
-          loadDataset(generateSample(next))
-        }}
+        onDemo={loadDemo}
         onConnect={() => setWizardOpen(true)}
         onHelp={(slug) => window.open(`/docs/${slug}`, '_blank')}
       />
@@ -841,7 +923,8 @@ export default function App() {
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
 
-      {wizardOpen && modeReady && !demoPreview && (
+      {wizardStarted && modeReady && !demoPreview && (
+        <div style={{ display: wizardOpen ? undefined : 'none' }}>
         <ConnectWizard
           hosted={appMode.hosted}
           serverKeys={appMode.serverKeys ?? { anthropic: appMode.hasServerKey, openai: false }}
@@ -858,9 +941,7 @@ export default function App() {
           onImportCsv={() => fileRef.current?.click()}
           onImportPlanFile={() => planFileRef.current?.click()}
           onDemo={() => {
-            const next = seed + 1
-            setSeed(next)
-            loadDataset(generateSample(next))
+            loadDemo()
             setWizardOpen(false)
           }}
           onPlanOnly={(p) => {
@@ -880,6 +961,7 @@ export default function App() {
           }}
           onClose={() => setWizardOpen(false)}
         />
+        </div>
       )}
 
       {importError && (
@@ -961,6 +1043,9 @@ export default function App() {
         />
         <span className="range-sep">to</span>
         <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} aria-label="Range end" />
+        {customFrom && customTo && customFrom > customTo && (
+        <span className="scan-hint">start is after end — dates swapped</span>
+        )}
         </>
         )}
         <select value={platform} onChange={(e) => setPlatform(e.target.value)} aria-label="Platform">
@@ -1023,16 +1108,29 @@ export default function App() {
             onSelectUser={setSelectedUserId}
           />
         ) : (
-          <div className="empty-note">No matching users — adjust the filters, or import a CSV with columns user_id, event, timestamp.</div>
+          <div className="empty-note">
+            No activity in this view — the last event was{' '}
+            <strong>
+              {new Date(dataset.events[dataset.events.length - 1].ts).toLocaleDateString(undefined, {
+                month: 'short',
+                day: 'numeric',
+              })}
+            </strong>
+            . Widen the date range (try All time) or clear the filters.
+          </div>
         )}
       </section>
 
       <InsightCards
-        key={projectKey ?? 'adhoc'}
+        // Demo gets its own card state per sample — a real project's saved
+        // insights must never render over (or be replaced by) fictional users
+        key={dataset.source.startsWith('Sample data') ? `demo:${seed}` : projectKey ?? 'adhoc'}
         model={model}
         dataset={dataset}
-        saved={insightsSaved}
-        onSaved={setInsightsSaved}
+        saved={dataset.source.startsWith('Sample data') ? null : insightsSaved}
+        onSaved={(r) => {
+          if (!datasetRef.current.source.startsWith('Sample data')) setInsightsSaved(r)
+        }}
         onHighlight={setHighlightUsers}
       />
 

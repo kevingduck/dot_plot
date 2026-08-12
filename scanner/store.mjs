@@ -69,11 +69,12 @@ export function readEvents(file = LEGACY_FILE) {
 
 export function storeInfo(file = LEGACY_FILE) {
   const events = readEvents(file)
-  return {
-    count: events.length,
-    file,
-    lastReceived: events.length ? Math.max(...events.map((e) => e.received_at ?? e.ts)) : null,
+  let last = null
+  for (const e of events) {
+    const t = e.received_at ?? e.ts
+    if (last === null || t > last) last = t
   }
+  return { count: events.length, file, lastReceived: last }
 }
 
 export function clearStore(file = LEGACY_FILE) {

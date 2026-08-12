@@ -16,9 +16,15 @@ function startOfDay(ts: number): number {
 }
 
 export interface DateRange {
-  lastDays?: number // preset: N most recent days of data (0/undefined = all)
+  lastDays?: number // preset: N most recent calendar days ending today (0/undefined = all)
   from?: string // custom range, YYYY-MM-DD (local)
   to?: string
+}
+
+/** n calendar days before ts (DST-safe — ms arithmetic drifts an hour across transitions). */
+function addDays(ts: number, n: number): number {
+  const d = new Date(ts)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n).getTime()
 }
 
 export interface ModelOptions {
@@ -45,27 +51,32 @@ export function buildModel(ds: Dataset, opts: ModelOptions): GridModel {
 
   const dataEnd = startOfDay(ds.events[ds.events.length - 1].ts)
   const dataStart = startOfDay(ds.events[0].ts)
+  const today = startOfDay(Date.now())
+  // The chart may extend past the data up to today — an empty recent stretch
+  // IS the signal (everyone churned); clamping to the data would hide it.
+  const chartEnd = Math.max(dataEnd, today)
   let rangeStart = dataStart
   let rangeEnd = dataEnd
   const { lastDays, from, to } = opts.range
   if (from || to) {
-    if (to) {
-      const t = startOfDay(new Date(to + 'T00:00:00').getTime())
-      if (!Number.isNaN(t)) rangeEnd = Math.min(Math.max(t, dataStart), dataEnd)
-    }
-    if (from) {
-      const f = startOfDay(new Date(from + 'T00:00:00').getTime())
-      if (!Number.isNaN(f)) rangeStart = Math.min(Math.max(f, dataStart), rangeEnd)
-    }
+    let f = from ? startOfDay(new Date(from + 'T00:00:00').getTime()) : NaN
+    let t = to ? startOfDay(new Date(to + 'T00:00:00').getTime()) : NaN
+    // An inverted range is a mis-entry, not a request for nonsense — swap it
+    if (!Number.isNaN(f) && !Number.isNaN(t) && f > t) [f, t] = [t, f]
+    if (!Number.isNaN(t)) rangeEnd = Math.min(Math.max(t, dataStart), chartEnd)
+    if (!Number.isNaN(f)) rangeStart = Math.min(Math.max(f, dataStart), rangeEnd)
   } else if (lastDays && lastDays > 0) {
-    rangeStart = Math.max(dataStart, rangeEnd - (lastDays - 1) * DAY)
+    // "Last N days" means calendar days ending today, not ending at the data
+    rangeEnd = chartEnd
+    rangeStart = Math.max(dataStart, addDays(rangeEnd, -(lastDays - 1)))
   }
   const numDays = Math.round((rangeEnd - rangeStart) / DAY) + 1
 
   const days: DayCol[] = []
   let prevMonth = -1
+  const start = new Date(rangeStart)
   for (let i = 0; i < numDays; i++) {
-    const date = new Date(rangeStart + i * DAY)
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i)
     const dow = date.getDay()
     days.push({
       date,
@@ -159,6 +170,7 @@ export function buildModel(ds: Dataset, opts: ModelOptions): GridModel {
 export interface Stats {
   users: number
   activeLastDay: number
+  lastDay: Date | null // the day "active on last day" refers to (last column)
   coreEvents: number
   oneAndDone: number // fraction 0..1, users whose only active day was their first
 }
@@ -183,6 +195,7 @@ export function computeStats(model: GridModel, coreKey: string | null): Stats {
   return {
     users: model.rows.length,
     activeLastDay,
+    lastDay: model.days.length > 0 ? model.days[model.days.length - 1].date : null,
     coreEvents,
     oneAndDone: model.rows.length > 0 ? oneAndDone / model.rows.length : 0,
   }
