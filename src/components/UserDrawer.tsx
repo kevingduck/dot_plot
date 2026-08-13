@@ -24,7 +24,9 @@ export function UserDrawer({ row, dataset, registry, colors, onClose }: Props) {
 
   const typeByKey = useMemo(() => new Map(registry.map((t) => [t.key, t])), [registry])
 
-  // All-time log for this user, grouped by day then event, newest first
+  // All-time log for this user, grouped by day then event, newest first.
+  // Counts keep the RAW event names — the grid may fold long-tail events
+  // into "Other", but the whole point of this drawer is the detail.
   const log = useMemo(() => {
     const byDay = new Map<string, { ts: number; counts: Map<string, number> }>()
     for (const e of dataset.events) {
@@ -35,11 +37,10 @@ export function UserDrawer({ row, dataset, registry, colors, onClose }: Props) {
         entry = { ts: e.ts, counts: new Map() }
         byDay.set(key, entry)
       }
-      const norm = typeByKey.has(e.event) ? e.event : '__other__'
-      entry.counts.set(norm, (entry.counts.get(norm) ?? 0) + 1)
+      entry.counts.set(e.event, (entry.counts.get(e.event) ?? 0) + 1)
     }
     return [...byDay.entries()].sort((a, b) => b[1].ts - a[1].ts)
-  }, [dataset, row.user.id, typeByKey])
+  }, [dataset, row.user.id])
 
   const firstSeenDate = new Date(row.firstSeenKey + 'T00:00:00')
 
@@ -96,11 +97,20 @@ export function UserDrawer({ row, dataset, registry, colors, onClose }: Props) {
                 </td>
                 <td>
                   {registry
-                    .filter((t) => (entry.counts.get(t.key) ?? 0) > 0)
+                    .filter((t) => t.key !== '__other__' && (entry.counts.get(t.key) ?? 0) > 0)
                     .map((t) => (
                       <span className="log-event" key={t.key}>
                         <ShapeIcon shape={t.shape} color={seriesColor(colors, t.slot)} size={10} />
                         <span className="log-count">{entry.counts.get(t.key)}</span> {t.label.toLowerCase()}
+                      </span>
+                    ))}
+                  {[...entry.counts]
+                    .filter(([k]) => !typeByKey.has(k))
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([k, n]) => (
+                      <span className="log-event log-event-other" key={k}>
+                        <ShapeIcon shape="dot" color={seriesColor(colors, -1)} size={10} />
+                        <span className="log-count">{n}</span> {k.replace(/_/g, ' ')}
                       </span>
                     ))}
                 </td>

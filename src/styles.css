@@ -569,6 +569,9 @@ a.btn {
   color: var(--text-muted);
   padding: 0 8px;
 }
+.log-event-other {
+  color: var(--text-muted);
+}
 
 /* ---- folder picker ---- */
 .picker {
