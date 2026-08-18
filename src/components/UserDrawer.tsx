@@ -29,12 +29,17 @@ interface DayLog {
   hits: { key: string; ts: number }[] // every event, chronological
 }
 
-const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+// Events carry epoch ms, so second precision is real, not padding — it is
+// what separates a burst of retries from work spread across an afternoon.
+// (Imported/synced sources are only as precise as their own column: a
+// date-only timestamp renders honestly as 12:00:00 AM.)
+const fmtTime = (ts: number) =>
+  new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })
 
 /**
- * "2:14 PM" for one firing, "1:31 – 2:10 PM" for several. The meridiem (or
- * whatever trailing token the locale uses) is printed once when both ends
- * share it — repeating it eats the drawer's width for no information.
+ * "2:14:09 PM" for one firing, "1:31:07 – 2:10:52 PM" for several. The
+ * meridiem (or whatever trailing token the locale uses) is printed once when
+ * both ends share it — repeating it eats the drawer's width for no information.
  */
 function timeSpan(first: number, last: number): string {
   const a = fmtTime(first)

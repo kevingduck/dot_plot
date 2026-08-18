@@ -1462,7 +1462,7 @@ button.picker-row:hover {
 .log-trace-time {
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
-  min-width: 62px;
+  min-width: 74px;
   text-align: right;
 }
 .log-trace-name {
