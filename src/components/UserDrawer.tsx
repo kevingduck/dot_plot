@@ -1,5 +1,5 @@
-import { useEffect, useMemo } from 'react'
-import type { Dataset, EventType, GridRow } from '../types'
+import { useEffect, useMemo, useState } from 'react'
+import type { Dataset, EventType, GridRow, Shape } from '../types'
 import type { ThemeColors } from '../theme'
 import { seriesColor } from '../theme'
 import { dayKey } from '../lib/model'
@@ -13,7 +13,42 @@ interface Props {
   onClose: () => void
 }
 
+interface LogLine {
+  key: string
+  label: string
+  shape: Shape
+  slot: number
+  n: number
+  first: number // ts of the first firing that day
+  last: number // ts of the last
+}
+
+interface DayLog {
+  ts: number // first event of the day, for ordering
+  lines: LogLine[]
+  hits: { key: string; ts: number }[] // every event, chronological
+}
+
+const fmtTime = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+
+/**
+ * "2:14 PM" for one firing, "1:31 – 2:10 PM" for several. The meridiem (or
+ * whatever trailing token the locale uses) is printed once when both ends
+ * share it — repeating it eats the drawer's width for no information.
+ */
+function timeSpan(first: number, last: number): string {
+  const a = fmtTime(first)
+  const b = fmtTime(last)
+  if (a === b) return a
+  const tailA = a.slice(a.lastIndexOf(' ') + 1)
+  const tailB = b.slice(b.lastIndexOf(' ') + 1)
+  const head = tailA === tailB && a.includes(' ') ? a.slice(0, a.lastIndexOf(' ')) : a
+  return `${head} – ${b}`
+}
+
 export function UserDrawer({ row, dataset, registry, colors, onClose }: Props) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -25,22 +60,61 @@ export function UserDrawer({ row, dataset, registry, colors, onClose }: Props) {
   const typeByKey = useMemo(() => new Map(registry.map((t) => [t.key, t])), [registry])
 
   // All-time log for this user, grouped by day then event, newest first.
-  // Counts keep the RAW event names — the grid may fold long-tail events
+  // Lines keep the RAW event names — the grid may fold long-tail events
   // into "Other", but the whole point of this drawer is the detail.
   const log = useMemo(() => {
-    const byDay = new Map<string, { ts: number; counts: Map<string, number> }>()
+    const byDay = new Map<string, DayLog>()
     for (const e of dataset.events) {
       if (e.userId !== row.user.id) continue
       const key = dayKey(e.ts)
-      let entry = byDay.get(key)
-      if (!entry) {
-        entry = { ts: e.ts, counts: new Map() }
-        byDay.set(key, entry)
+      let day = byDay.get(key)
+      if (!day) {
+        day = { ts: e.ts, lines: [], hits: [] }
+        byDay.set(key, day)
       }
-      entry.counts.set(e.event, (entry.counts.get(e.event) ?? 0) + 1)
+      day.hits.push({ key: e.event, ts: e.ts })
+    }
+    // dataset.events is sorted by ts, so each day's hits already are too.
+    for (const day of byDay.values()) {
+      const seen = new Map<string, LogLine>()
+      for (const hit of day.hits) {
+        let line = seen.get(hit.key)
+        if (!line) {
+          const t = typeByKey.get(hit.key)
+          line = {
+            key: hit.key,
+            label: t && t.key !== '__other__' ? t.label.toLowerCase() : hit.key.replace(/_/g, ' '),
+            shape: t?.shape ?? 'dot',
+            slot: t?.slot ?? -1,
+            n: 0,
+            first: hit.ts,
+            last: hit.ts,
+          }
+          seen.set(hit.key, line)
+        }
+        line.n++
+        line.last = hit.ts
+      }
+      // Registry order first (matching the legend), then long-tail events.
+      const known = registry.filter((t) => t.key !== '__other__' && seen.has(t.key)).map((t) => seen.get(t.key)!)
+      const rest = [...seen.values()].filter((l) => !typeByKey.has(l.key)).sort((a, b) => b.n - a.n)
+      day.lines = [...known, ...rest]
+      day.ts = day.hits[0].ts
     }
     return [...byDay.entries()].sort((a, b) => b[1].ts - a[1].ts)
-  }, [dataset, row.user.id])
+  }, [dataset, registry, typeByKey, row.user.id])
+
+  const labelFor = (key: string) => {
+    const t = typeByKey.get(key)
+    return t && t.key !== '__other__' ? t.label.toLowerCase() : key.replace(/_/g, ' ')
+  }
+
+  const toggle = (key: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(key)) next.add(key)
+      return next
+    })
 
   const firstSeenDate = new Date(row.firstSeenKey + 'T00:00:00')
 
@@ -81,43 +155,51 @@ export function UserDrawer({ row, dataset, registry, colors, onClose }: Props) {
           </div>
         </div>
         <div className="drawer-log-title">Event log (all time)</div>
-        <table className="drawer-table">
-          <thead>
-            <tr>
-              <th>Day</th>
-              <th>Events</th>
-            </tr>
-          </thead>
-          <tbody>
-            {log.map(([key, entry]) => (
-              <tr key={key}>
-                <td className="log-date">
+        <div className="drawer-log-hint">Times are in your local timezone — click a day for the exact sequence.</div>
+        {log.map(([key, day]) => {
+          const open = expanded.has(key)
+          return (
+            <div className="log-day" key={key}>
+              <button className="log-day-head" onClick={() => toggle(key)} aria-expanded={open}>
+                <span className={`log-caret${open ? ' is-open' : ''}`} aria-hidden="true">
+                  ▸
+                </span>
+                <span className="log-date">
                   {new Date(key + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
                   {key === row.firstSeenKey && <span className="log-first"> · first day</span>}
-                </td>
-                <td>
-                  {registry
-                    .filter((t) => t.key !== '__other__' && (entry.counts.get(t.key) ?? 0) > 0)
-                    .map((t) => (
-                      <span className="log-event" key={t.key}>
-                        <ShapeIcon shape={t.shape} color={seriesColor(colors, t.slot)} size={10} />
-                        <span className="log-count">{entry.counts.get(t.key)}</span> {t.label.toLowerCase()}
-                      </span>
-                    ))}
-                  {[...entry.counts]
-                    .filter(([k]) => !typeByKey.has(k))
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([k, n]) => (
-                      <span className="log-event log-event-other" key={k}>
-                        <ShapeIcon shape="dot" color={seriesColor(colors, -1)} size={10} />
-                        <span className="log-count">{n}</span> {k.replace(/_/g, ' ')}
-                      </span>
-                    ))}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </span>
+                {day.lines.length > 1 && (
+                  // With one event type the per-line span already says this.
+                  <span className="log-day-span">{timeSpan(day.ts, day.hits[day.hits.length - 1].ts)}</span>
+                )}
+              </button>
+              <div className="log-lines">
+                {day.lines.map((line) => (
+                  <div className={`log-event${line.slot < 0 ? ' log-event-other' : ''}`} key={line.key}>
+                    <ShapeIcon shape={line.shape} color={seriesColor(colors, line.slot)} size={10} />
+                    <span className="log-count">{line.n}</span>
+                    <span className="log-label">{line.label}</span>
+                    <span className="log-time">{timeSpan(line.first, line.last)}</span>
+                  </div>
+                ))}
+              </div>
+              {open && (
+                <ol className="log-trace">
+                  {day.hits.map((hit, i) => {
+                    const t = typeByKey.get(hit.key)
+                    return (
+                      <li key={i}>
+                        <span className="log-trace-time">{fmtTime(hit.ts)}</span>
+                        <ShapeIcon shape={t?.shape ?? 'dot'} color={seriesColor(colors, t?.slot ?? -1)} size={8} />
+                        <span className="log-trace-name">{labelFor(hit.key)}</span>
+                      </li>
+                    )
+                  })}
+                </ol>
+              )}
+            </div>
+          )
+        })}
       </aside>
     </>
   )
